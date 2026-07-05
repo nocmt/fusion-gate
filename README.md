@@ -1,72 +1,70 @@
 # FusionGate
 
-> 多模型融合 AI 编程网关 — 对外暴露 OpenAI 兼容接口（Chat Completions + Responses API），
-> 对内用审查模型（组长）拉上多个子模型（组员）集思广益，审查模型最后综合子模型答案、
-> 决定工具调用并输出最终结果。开箱即用。
-> 自适应路由 — 简单任务直接回答（省成本），复杂任务自动触发多子模型协同
-> 请求级语义缓存 — 相同（消息+工具+分组）只调一次 API，10min TTL，命中率 >85%
+> [中文文档](README-zh.md) | English
 
-## 工作原理
+> A multi-model fusion AI gateway. One reviewer leads, many models contribute — one best answer comes out.
+> Exposes OpenAI-compatible APIs (Chat Completions + Responses API). Fully local, single binary, zero dependencies.
+
+## How It Works
 
 ```
 Codex ──POST /v1/responses──▶ FusionGate
                                 │
                 ┌───────────────┼───────────────┐
                 ▼               ▼               ▼
-           子模型 A         子模型 B        子模型 C
-         (出解法建议)    (出解法建议)     (出解法建议)
+           Worker A         Worker B         Worker C
+         (analyzes)       (analyzes)        (analyzes)
                 │               │               │
                 └───────────────┼───────────────┘
                                 ▼
-                       审查模型（组长）
-                  审核所有子模型答案
-                 综合输出最优方案
-                 决定并执行工具调用
+                        Reviewer (lead)
+                   Reviews all worker answers
+                  Synthesizes the best output
+                   Decides & executes tools
                                 │
                                 ▼
-                   返回给 Codex 执行
+                      Returns to Codex
 ```
 
-- **子模型**只提供解法分析，不直接调用工具
-- **审查模型**收集所有子模型答案，审核综合，输出最佳结果，独占工具调用权
-- Codex 发来的工具定义原样透传给审查模型；子模型只被告知有这些工具（但不能直接调用）
+- **Worker models** provide analysis only — no direct tool access
+- **Reviewer model** collects, reviews, synthesizes, and holds exclusive tool-calling authority
+- Codex's tool definitions are passed through to the reviewer; workers are informed of available tools but cannot call them
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 编译（零外部依赖，纯标准库）
+# Build (zero external dependencies, pure stdlib)
 go build -o fusiongate ./cmd/fusiongate/
 go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
-# 填写 config.json（见下方配置说明）
+# Fill in config.json with real API keys
 
-# 启动（启动时自动检查每个供应商健康状态，结果加密缓存到 /tmp）
+# Start (auto health-checks every provider; results encrypted & cached to /tmp)
 ./fusiongate
 
-# 在 Codex 中将 API Base URL 设为 http://localhost:8086/v1
+# In Codex: set API Base URL to http://localhost:8086/v1
 ```
 
-## 在 Codex 中测试 → 见 [docs/codex-guide.md](docs/codex-guide.md)
+## Codex Testing Guide → [docs/codex-guide.md](docs/codex-guide.md)
 
-包含：配置方法、三个难度等级的实测题目、主流评测基准清单、GPT-5.4 主模型分析。
+Includes: setup instructions, three difficulty levels of test prompts, benchmark suite overview, and GPT-5.4 reviewer analysis.
 
-## 缓存策略
+## Cache Strategy
 
-FusionGate 内置三层缓存优化（参考 OpenClacky 90.6% 命中率实践）：
+Three-layer cache optimization (inspired by OpenClacky's 90.6% hit-rate practice):
 
-| 层            | 机制                                        | 效果                                     |
-| ------------- | ------------------------------------------- | ---------------------------------------- |
-| **请求级**    | 相同(消息+工具+分组) SHA256 去重，10min TTL | 重复请求零 API 调用                      |
-| **Worker 级** | 相同子任务的 provider 共享结果              | 减少并行 API 调用                        |
-| **Prompt 级** | 英文 prompt + 稳定前缀前置，动态上下文后置  | 提升上游 provider 的 prompt cache 命中率 |
+| Layer | Mechanism | Impact |
+|-------|-----------|--------|
+| **Request-level** | SHA256(messages + tools + group) dedup, 10min TTL | Zero API calls on repeats |
+| **Worker-level** | Identical sub-tasks share one provider call | Less parallel API usage |
+| **Prompt-level** | English prompts + stable prefix first, dynamic context last | Boosts upstream prompt cache hits |
 
 ```
-请求 1: "用 Go 写快速排序" → 3 workers → 审查模型合成 → 缓存 (4 API calls)
-请求 2: "用 Go 写快速排序" → 缓存命中 → 直接返回 (0 API calls)
+Request 1: "Write quicksort in Go" → 3 workers → reviewer synthesis → cached (4 API calls)
+Request 2: "Write quicksort in Go" → cache hit → instant return (0 API calls)
 ```
 
-
-## 配置说明（config.json）
+## Configuration (config.json)
 
 ```jsonc
 {
@@ -86,81 +84,86 @@ FusionGate 内置三层缓存优化（参考 OpenClacky 90.6% 命中率实践）
   "groups": [
     {
       "name": "coding_expert",
-      "reviewer": "deepseek",              // 审查模型（组长）
-      "providers": ["deepseek", "minimax", "glm"]  // 子模型（组员）
+      "reviewer": "deepseek",                        // reviewer (lead)
+      "providers": ["deepseek", "minimax", "glm"]    // workers (experts)
     }
   ],
+  "session": { "enabled": true, "ttl": "1h" },
   "log_level": "info",
   "cli": { "port": 8086, "host": "0.0.0.0", "language": "zh-CN" }
 }
 ```
 
-**推荐模型组合**（经实测验证）：
-- 审查模型：DeepSeek-V4-Pro（长上下文 + 强审核能力）
-- 子模型：DeepSeek-V4-Pro / MiniMax-M3 / GLM-5.2
+**Recommended models** (benchmark-verified):
+- Reviewer: DeepSeek-V4-Pro (long context + strong review ability)
+- Workers: DeepSeek-V4-Pro / MiniMax-M3 / GLM-5.2
 
-## A/B 基准测试
+## A/B Benchmarking
 
 ```bash
-# 需要先在 config.json 添加一个 single 分组用于单模型对比：
-# {
-#   "name": "single",
-#   "reviewer": "deepseek",
-#   "providers": []
-# }
+# Add a single-model group for comparison:
+# { "name": "single", "reviewer": "deepseek", "providers": [] }
 
-# 运行测试（支持断点续跑，中断后重跑会跳过已完成部分）
+# Run (supports resume — re-run picks up where it left off)
 ./fusiongate-bench --config eval/questions.json --gateway http://localhost:8086
 
-# 查看报告
+# View report
 cat eval/report.md
 ```
 
-**实测效果**（deepseek-v4-pro + MiniMax-M3 + glm-5.2，10 题×2 轮）：
+**Benchmark results** (deepseek-v4-pro + MiniMax-M3 + glm-5.2, 10 questions × 2 rounds):
 
-| 模式                     | 得分        |
-| ------------------------ | ----------- |
-| 单模型 (DeepSeek direct) | 3.90 / 5.00 |
-| Fusion (3 模型融合)      | 4.05 / 5.00 |
-| **提升**                 | **+0.15**   |
+| Mode | Score |
+|------|-------|
+| Single (DeepSeek direct) | 3.90 / 5.00 |
+| Fusion (3-model ensemble) | 4.05 / 5.00 |
+| **Delta** | **+0.15** |
 
-Fusion 在架构设计题上提升最显著 (+2.8)，算法题也有明显优势 (+1.0)。
+Fusion shows the strongest gains on architecture design questions (+2.8) and algorithm tasks (+1.0).
 
-## 接口
+## Endpoints
 
-| 端点                        | 用途                      |
-| --------------------------- | ------------------------- |
-| `POST /v1/chat/completions` | OpenAI 兼容               |
-| `POST /v1/responses`        | Responses API（Codex 用） |
-| `GET /v1/models`            | 模型列表                  |
-| `GET /health`               | 健康检查                  |
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /v1/chat/completions` | OpenAI-compatible |
+| `POST /v1/responses` | Responses API (for Codex) |
+| `GET /v1/models` | Model list |
+| `GET /health` | Health check |
 
-## 启动时健康检查
+## Startup Health Check
 
-启动时会向每个供应商发送一条最小化请求验证连通性：
-- ✅ 通过 → 显示延迟
-- ❌ 失败 → 显示具体错误（401/超时等）
-- 结果加密缓存到 `/tmp/fusiongate_health_check`，配置不变则跳过
+On startup, each provider is probed with a minimal request:
+- ✅ Pass → latency is shown
+- ❌ Fail → specific error is logged (401 / timeout / etc.)
+- Results are AES-GCM encrypted and cached to `/tmp/fusiongate_health_check`; skipped if config is unchanged
 
-## 项目结构
+## Project Structure
 
 ```
 fusiongate/
-├── cmd/fusiongate/main.go       # 入口 + 健康检查
-├── cmd/fusiongate-bench/main.go # benchmark 工具
+├── cmd/fusiongate/main.go          # entrypoint + health check
+├── cmd/fusiongate-bench/main.go    # benchmark CLI
 ├── internal/
-│   ├── config/config.go         # 配置加载
-│   ├── health/checker.go        # 健康检查 + AES 加密缓存
-│   ├── logger/logger.go        # 彩色日志
-│   ├── types/types.go           # 类型定义
-│   ├── client/client.go         # 上游调用
-│   ├── orchestrator/orchestrator.go # 融合引擎
-│   └── handler/openai.go        # HTTP 路由 + 格式转换
-├── eval/questions.json          # 测试题库
-├── config.json                  # 配置（含 API Key，已 gitignore）
+│   ├── cache/store.go             # request-level semantic cache
+│   ├── config/config.go           # config loading & validation
+│   ├── health/checker.go          # health check + AES cache
+│   ├── session/store.go           # previous_response_id mapping
+│   ├── logger/logger.go           # colored logger
+│   ├── types/
+│   │   ├── types.go               # Chat Completions types
+│   │   └── responses.go          # Responses API types
+│   ├── client/
+│   │   ├── client.go             # upstream HTTP calls
+│   │   └── stream.go             # upstream streaming
+│   ├── orchestrator/orchestrator.go # fusion engine
+│   └── handler/openai.go          # HTTP routing + format conversion
+├── eval/questions.json             # benchmark question bank
+├── docs/codex-guide.md             # Codex testing guide
+├── config.json                     # config (contains API keys, gitignored)
+├── LICENSE
 └── .gitignore
 ```
 
-## 许可证
+## License
 
 MIT
