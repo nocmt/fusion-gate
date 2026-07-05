@@ -33,3 +33,4 @@ eval/report.json
 # 加密缓存
 fusiongate_health_check
 .workbuddy
+docs/codex-guide.md

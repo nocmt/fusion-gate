@@ -298,15 +298,45 @@ func resolveGroup(xGroup, model string, cfg *config.Config) string {
 func writeErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": msg}})
+	json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{
+			"message": msg,
+			"type":    errorTypeForCode(code),
+			"code":    code,
+		},
+	})
 }
 
 func writeResponsesErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]string{"message": msg, "type": "api_error"},
+		"error": map[string]any{
+			"message": msg,
+			"type":    errorTypeForCode(code),
+			"code":    errorCodeForCode(code),
+		},
 	})
+}
+
+func errorTypeForCode(code int) string {
+	switch {
+	case code == 400: return "invalid_request_error"
+	case code == 401 || code == 403: return "authentication_error"
+	case code == 404: return "not_found_error"
+	case code == 429: return "rate_limit_error"
+	case code >= 500: return "api_error"
+	default: return "api_error"
+	}
+}
+
+func errorCodeForCode(code int) string {
+	switch {
+	case code == 400: return "invalid_request"
+	case code == 401: return "invalid_api_key"
+	case code == 429: return "rate_limit_exceeded"
+	default: return "server_error"
+	}
 }
 
 func setSSEHeaders(w http.ResponseWriter) {

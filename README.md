@@ -3,6 +3,8 @@
 > 多模型融合 AI 编程网关 — 对外暴露 OpenAI 兼容接口（Chat Completions + Responses API），
 > 对内用审查模型（组长）拉上多个子模型（组员）集思广益，审查模型最后综合子模型答案、
 > 决定工具调用并输出最终结果。开箱即用。
+> 
+> **v1.1 新特性**: 自适应路由 — 简单任务直接回答（省成本），复杂任务自动触发多子模型协同
 
 ## 工作原理
 
@@ -43,6 +45,10 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
 # 在 Codex 中将 API Base URL 设为 http://localhost:8086/v1
 ```
+
+## 在 Codex 中测试 → 见 [docs/codex-guide.md](docs/codex-guide.md)
+
+包含：配置方法、三个难度等级的实测题目、主流评测基准清单、GPT-5.4 主模型分析。
 
 ## 配置说明（config.json）
 
