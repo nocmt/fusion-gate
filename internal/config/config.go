@@ -22,6 +22,13 @@ type Provider struct {
 	OutputTokenPrice float64 `json:"output_token_price"`
 }
 
+// SessionConfig 会话管理配置（用于 previous_response_id 映射）。
+type SessionConfig struct {
+	Enabled     bool          `json:"enabled"`
+	TTL         string        `json:"ttl"`
+	TTLDuration time.Duration `json:"-"`
+}
+
 // Group 绑定审查模型和一组子模型。
 type Group struct {
 	Name      string   `json:"name"`
@@ -38,10 +45,11 @@ type CLI struct {
 
 // Config 顶层配置。
 type Config struct {
-	Providers []Provider `json:"providers"`
-	Groups    []Group    `json:"groups"`
-	LogLevel  string     `json:"log_level"`
-	CLI       CLI        `json:"cli"`
+	Providers []Provider    `json:"providers"`
+	Groups    []Group       `json:"groups"`
+	Session   SessionConfig `json:"session"`
+	LogLevel  string        `json:"log_level"`
+	CLI       CLI           `json:"cli"`
 
 	providerMap map[string]Provider
 	groupMap    map[string]Group
@@ -77,15 +85,16 @@ func Load() (*Config, error) {
 
 func parse(data []byte) (*Config, error) {
 	var raw struct {
-		Providers []Provider `json:"providers"`
-		Groups    []Group    `json:"groups"`
-		LogLevel  string     `json:"log_level"`
-		CLI       CLI        `json:"cli"`
+		Providers []Provider    `json:"providers"`
+		Groups    []Group       `json:"groups"`
+		Session   SessionConfig `json:"session"`
+		LogLevel  string        `json:"log_level"`
+		CLI       CLI           `json:"cli"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil { return nil, err }
 	cfg := &Config{
 		Providers: raw.Providers, Groups: raw.Groups,
-		LogLevel: raw.LogLevel, CLI: raw.CLI,
+		Session: raw.Session, LogLevel: raw.LogLevel, CLI: raw.CLI,
 	}
 	cfg.index()
 	cfg.fillDefaults()
@@ -104,6 +113,11 @@ func (c *Config) fillDefaults() {
 	if c.CLI.Port == 0 { c.CLI.Port = 8080 }
 	if c.CLI.Host == "" { c.CLI.Host = "0.0.0.0" }
 	if c.CLI.Language == "" { c.CLI.Language = "zh-CN" }
+	if !c.Session.Enabled && c.Session.TTL != "" { c.Session.Enabled = true }
+	if c.Session.TTL == "" { c.Session.TTL = "1h" }
+	d, err := time.ParseDuration(c.Session.TTL)
+	if err != nil { d = time.Hour }
+	c.Session.TTLDuration = d
 }
 
 func (c *Config) Provider(name string) (Provider, bool) {

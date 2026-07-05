@@ -12,13 +12,16 @@ import (
 	"fusiongate/internal/config"
 	"fusiongate/internal/logger"
 	"fusiongate/internal/orchestrator"
+	"fusiongate/internal/session"
 	"fusiongate/internal/types"
 )
 
-// HandleChatCompletions 处理 POST /v1/chat/completions（OpenAI 格式）
+// ---- /v1/chat/completions ----
+
 func HandleChatCompletions(
 	cfg *config.Config,
 	orch *orchestrator.Orchestrator,
+	sess *session.Store,
 	log *logger.Logger,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -28,22 +31,19 @@ func HandleChatCompletions(
 		}
 		var req types.ChatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, "解析失败: "+err.Error(), http.StatusBadRequest)
+			writeErr(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		r.Body.Close()
 
 		groupName := resolveGroup(req.XGroup, req.Model, cfg)
-		log.Info("ChatCompletions  model=%s  group=%s  stream=%v  tools=%d",
+		log.Info("ChatCompletions model=%s group=%s stream=%v tools=%d",
 			req.Model, groupName, req.Stream, len(req.Tools))
 
 		ictx := types.InternalContext{
-			GroupName:   groupName,
-			Tools:       req.Tools,
-			Stream:      req.Stream,
-			Temperature: req.Temperature,
-			MaxTokens:   req.MaxTokens,
-			TopP:        req.TopP,
+			GroupName: groupName, Tools: req.Tools,
+			Stream: req.Stream, Temperature: req.Temperature,
+			MaxTokens: req.MaxTokens, TopP: req.TopP,
 		}
 
 		if req.Stream {
@@ -54,8 +54,7 @@ func HandleChatCompletions(
 	}
 }
 
-func handleChatNonStream(
-	w http.ResponseWriter, r *http.Request,
+func handleChatNonStream(w http.ResponseWriter, r *http.Request,
 	req types.ChatCompletionRequest, ictx types.InternalContext,
 	orch *orchestrator.Orchestrator, log *logger.Logger,
 ) {
@@ -64,18 +63,18 @@ func handleChatNonStream(
 
 	resp, err := orch.Run(ctx, req, ictx)
 	if err != nil {
-		log.Error("融合失败: %v", err)
+		log.Error("fusion failed: %v", err)
 		writeErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if resp.ServiceTier == "" { resp.ServiceTier = "default" }
 	raw, _ := json.Marshal(resp)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(raw)
 }
 
-func handleChatStream(
-	w http.ResponseWriter, r *http.Request,
+func handleChatStream(w http.ResponseWriter, r *http.Request,
 	req types.ChatCompletionRequest, ictx types.InternalContext,
 	orch *orchestrator.Orchestrator, log *logger.Logger,
 ) {
@@ -83,26 +82,53 @@ func handleChatStream(
 	defer cancel()
 
 	flusher, ok := w.(http.Flusher)
-	if !ok { writeErr(w, "不支持流式", http.StatusInternalServerError); return }
+	if !ok { writeErr(w, "SSE not supported", http.StatusInternalServerError); return }
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
 	ch, err := orch.RunStream(ctx, req, ictx)
 	if err != nil { writeErr(w, err.Error(), http.StatusInternalServerError); return }
+
+	var totalUsage types.Usage
+	chunkCount := 0
 	for chunk := range ch {
+		chunkCount++
+		// 累积 usage
+		if chunk.Usage.TotalTokens > 0 { totalUsage = chunk.Usage }
 		raw, _ := json.Marshal(chunk)
 		fmt.Fprintf(w, "data: %s\n\n", string(raw))
 		flusher.Flush()
 	}
+
+	// 发送末尾 chunk（含 usage + finish_reason）
+	if chunkCount == 0 {
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+		return
+	}
+	final := types.StreamChunk{
+		ID: fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli()),
+		Object: "chat.completion.chunk", Created: time.Now().Unix(),
+		Model: req.Model,
+		Choices: []types.ChunkChoice{{
+			Index: 0, Delta: types.Delta{},
+			FinishReason: strPtr("stop"),
+		}},
+		Usage: totalUsage,
+	}
+	raw, _ := json.Marshal(final)
+	fmt.Fprintf(w, "data: %s\n\n", string(raw))
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }
 
-// HandleResponses 处理 POST /v1/responses（Codex 格式）
+// ---- /v1/responses ----
+
 func HandleResponses(
 	cfg *config.Config,
 	orch *orchestrator.Orchestrator,
+	sess *session.Store,
 	log *logger.Logger,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -114,36 +140,46 @@ func HandleResponses(
 
 		var req types.ResponsesRequest
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeResponsesErr(w, "解析失败: "+err.Error(), http.StatusBadRequest)
+			writeResponsesErr(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		groupName := resolveGroup(req.XGroup, req.Model, cfg)
 		modelName := cfg.ResolveModelName(req.Model)
 
-		log.Info("Responses  model=%s  group=%s  stream=%v  tools=%d",
-			req.Model, groupName, req.Stream, len(req.Tools))
-
-		// 转成 ChatCompletions 格式
-		chatReq, err := responsesReqToChat(req)
-		if err != nil {
-			writeResponsesErr(w, err.Error(), http.StatusBadRequest)
-			return
+		// previous_response_id 会话续接
+		sessionID := ""
+		if req.PreviousResponseID != "" {
+			if e := sess.FindByPrevResponse(req.PreviousResponseID); e != nil {
+				sessionID = e.ID
+				log.Info("session resume prev=%s sid=%s", req.PreviousResponseID, sessionID)
+			}
+		}
+		if sessionID == "" {
+			convID := extractConvID(req)
+			if e := sess.FindByConv(convID); e != nil { sessionID = e.ID }
+		}
+		if sessionID == "" {
+			sessionID = sess.Register(extractConvID(req), groupName)
 		}
 
+		log.Info("Responses model=%s group=%s stream=%v tools=%d sid=%s",
+			req.Model, groupName, req.Stream, len(req.Tools), sessionID)
+
+		chatReq, err := responsesReqToChat(req)
+		if err != nil { writeResponsesErr(w, err.Error(), http.StatusBadRequest); return }
+
 		ictx := types.InternalContext{
-			GroupName:   groupName,
-			Tools:       chatToolsFromResponses(req.Tools),
-			Stream:      req.Stream,
-			Temperature: req.Temperature,
-			MaxTokens:   req.MaxOutputTokens,
-			TopP:        req.TopP,
+			GroupName: groupName,
+			Tools:     chatToolsFromResponses(req.Tools),
+			Stream:    req.Stream,
+			Temperature: req.Temperature, MaxTokens: req.MaxOutputTokens, TopP: req.TopP,
 		}
 
 		if req.Stream {
-			handleResponsesStream(w, r, chatReq, ictx, modelName, orch, log)
+			handleResponsesStream(w, r, chatReq, ictx, modelName, sessionID, sess, orch, log)
 		} else {
-			handleResponsesNonStream(w, r, chatReq, ictx, modelName, orch, log)
+			handleResponsesNonStream(w, r, chatReq, ictx, modelName, sessionID, sess, orch, log)
 		}
 	}
 }
@@ -151,20 +187,28 @@ func HandleResponses(
 func handleResponsesNonStream(
 	w http.ResponseWriter, r *http.Request,
 	chatReq types.ChatCompletionRequest, ictx types.InternalContext,
-	modelName string, orch *orchestrator.Orchestrator, log *logger.Logger,
+	modelName, sessionID string, sess *session.Store,
+	orch *orchestrator.Orchestrator, log *logger.Logger,
 ) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
 	result, err := orch.Run(ctx, chatReq, ictx)
 	if err != nil {
-		log.Error("融合失败: %v", err)
+		log.Error("fusion failed: %v", err)
 		writeResponsesErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	respID := config.NextID()
 	resp := chatToResponses(*result, modelName)
-	resp.ID = config.NextID()
+	resp.ID = respID
+	resp.ResponseID = respID
+
+	// 记录映射：下次带 previous_response_id 可找回
+	sess.UpdateState(sessionID, "main", result.ID, "")
+	if result.ServiceTier == "" { result.ServiceTier = "default" }
+
 	raw, _ := json.Marshal(resp)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -174,13 +218,14 @@ func handleResponsesNonStream(
 func handleResponsesStream(
 	w http.ResponseWriter, r *http.Request,
 	chatReq types.ChatCompletionRequest, ictx types.InternalContext,
-	modelName string, orch *orchestrator.Orchestrator, log *logger.Logger,
+	modelName, sessionID string, sess *session.Store,
+	orch *orchestrator.Orchestrator, log *logger.Logger,
 ) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
 
 	flusher, ok := w.(http.Flusher)
-	if !ok { writeResponsesErr(w, "SSE 不支持", http.StatusInternalServerError); return }
+	if !ok { writeResponsesErr(w, "SSE not supported", http.StatusInternalServerError); return }
 	setSSEHeaders(w)
 
 	respID := config.NextID()
@@ -204,12 +249,12 @@ func handleResponsesStream(
 	textStarted := false
 	var fullText strings.Builder
 	var outputItems []types.OutputItem
+	var totalInput, totalOutput int
 
 	for chunk := range ch {
 		for _, c := range chunk.Choices {
 			if c.Delta.Content != "" {
 				if !textStarted {
-					// message output_item.added
 					sendSSE(w, flusher, "response.output_item.added", types.EventOutputItemAdded{
 						OutputIndex: 0,
 						Item: types.OutputItem{
@@ -229,9 +274,12 @@ func handleResponsesStream(
 				})
 			}
 		}
+		if chunk.Usage.TotalTokens > 0 {
+			totalInput = chunk.Usage.PromptTokens
+			totalOutput = chunk.Usage.CompletionTokens
+		}
 	}
 
-	// 完成
 	if textStarted {
 		sendSSE(w, flusher, "response.text.done", types.EventTextDone{
 			OutputIndex: 0, ItemID: msgID, ContentIndex: 0, Text: fullText.String(),
@@ -249,14 +297,25 @@ func handleResponsesStream(
 		})
 	}
 
+	usage := &types.UsageDetail{}
+	if totalInput+totalOutput > 0 {
+		usage = &types.UsageDetail{
+			InputTokens: totalInput, OutputTokens: totalOutput,
+			TotalTokens: totalInput + totalOutput,
+		}
+	}
+
 	sendSSE(w, flusher, "response.completed", types.EventResponseCompleted{
 		ID: respID, Object: "response", CreatedAt: respCreated,
 		Model: modelName, Status: "completed", Output: outputItems,
-		Usage: &types.UsageDetail{},
+		Usage: usage,
 	})
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
+
+	// 记录映射
+	sess.UpdateState(sessionID, "main", respID, "")
 }
 
 // ---- /v1/models ----
@@ -285,12 +344,8 @@ func HandleHealth() http.HandlerFunc {
 // ---- 辅助 ----
 
 func resolveGroup(xGroup, model string, cfg *config.Config) string {
-	if xGroup != "" {
-		if _, ok := cfg.Group(xGroup); ok { return xGroup }
-	}
-	for _, g := range cfg.Groups {
-		if g.Name == model { return g.Name }
-	}
+	if xGroup != "" { if _, ok := cfg.Group(xGroup); ok { return xGroup } }
+	for _, g := range cfg.Groups { if g.Name == model { return g.Name } }
 	if len(cfg.Groups) > 0 { return cfg.Groups[0].Name }
 	return ""
 }
@@ -299,11 +354,7 @@ func writeErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{
-			"message": msg,
-			"type":    errorTypeForCode(code),
-			"code":    code,
-		},
+		"error": map[string]any{"message": msg, "type": errorTypeForCode(code), "code": code},
 	})
 }
 
@@ -311,11 +362,7 @@ func writeResponsesErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{
-			"message": msg,
-			"type":    errorTypeForCode(code),
-			"code":    errorCodeForCode(code),
-		},
+		"error": map[string]any{"message": msg, "type": errorTypeForCode(code), "code": errorCodeForCode(code)},
 	})
 }
 
@@ -351,21 +398,13 @@ func sendSSE(w http.ResponseWriter, flusher http.Flusher, event string, data any
 	flusher.Flush()
 }
 
-// ---- 格式转换（内联，避免依赖 converter 包）----
+// ---- 格式转换 ----
 
 func responsesReqToChat(req types.ResponsesRequest) (types.ChatCompletionRequest, error) {
-	cc := types.ChatCompletionRequest{
-		Model:       req.Model,
-		Stream:      req.Stream,
-		Temperature: req.Temperature,
-		MaxTokens:   req.MaxOutputTokens,
-		TopP:        req.TopP,
-	}
+	cc := types.ChatCompletionRequest{Model: req.Model, Stream: req.Stream, Temperature: req.Temperature, MaxTokens: req.MaxOutputTokens, TopP: req.TopP}
 	msgs, err := responsesInputToMessages(req.Input)
 	if err != nil { return cc, err }
-	if req.Instructions != "" {
-		msgs = append([]types.Message{{Role: "system", Content: req.Instructions}}, msgs...)
-	}
+	if req.Instructions != "" { msgs = append([]types.Message{{Role: "system", Content: req.Instructions}}, msgs...) }
 	cc.Messages = msgs
 	return cc, nil
 }
@@ -378,31 +417,22 @@ func responsesInputToMessages(input any) ([]types.Message, error) {
 		return []types.Message{{Role: "user", Content: v}}, nil
 	default:
 		raw, _ := json.Marshal(input)
-		return parseInputArray(raw)
-	}
-}
-
-func parseInputArray(raw json.RawMessage) ([]types.Message, error) {
-	var arr []json.RawMessage
-	if err := json.Unmarshal(raw, &arr); err != nil { return nil, fmt.Errorf("input 格式错误: %w", err) }
-	var msgs []types.Message
-	for _, item := range arr {
-		var typ struct{ Type string }
-		json.Unmarshal(item, &typ)
-		switch typ.Type {
-		case "message":
-			var im types.InputMessage
-			json.Unmarshal(item, &im)
-			msgs = append(msgs, types.Message{Role: im.Role, Content: extractText(im.Content)})
-		case "function_call_output":
-			var fo types.FunctionCallOutput
-			json.Unmarshal(item, &fo)
-			msgs = append(msgs, types.Message{Role: "tool", ToolCallID: fo.CallID, Content: fo.Output})
-		default:
-			continue
+		var arr []json.RawMessage
+		if json.Unmarshal(raw, &arr) != nil { return nil, fmt.Errorf("input format error") }
+		var msgs []types.Message
+		for _, item := range arr {
+			var typ struct{ Type string }; json.Unmarshal(item, &typ)
+			switch typ.Type {
+			case "message":
+				var im types.InputMessage; json.Unmarshal(item, &im)
+				msgs = append(msgs, types.Message{Role: im.Role, Content: extractText(im.Content)})
+			case "function_call_output":
+				var fo types.FunctionCallOutput; json.Unmarshal(item, &fo)
+				msgs = append(msgs, types.Message{Role: "tool", ToolCallID: fo.CallID, Content: fo.Output})
+			}
 		}
+		return msgs, nil
 	}
-	return msgs, nil
 }
 
 func extractText(content any) string {
@@ -436,15 +466,9 @@ func chatToResponses(cc types.ChatCompletionResponse, model string) types.Respon
 			})
 		}
 	}
-	resp := types.ResponsesResponse{
-		ID: cc.ID, Object: "response", CreatedAt: cc.Created,
-		Model: model, Status: "completed", Output: output,
-	}
+	resp := types.ResponsesResponse{ID: cc.ID, Object: "response", CreatedAt: cc.Created, Model: model, Status: "completed", Output: output}
 	if cc.Usage.TotalTokens > 0 {
-		resp.Usage = &types.UsageDetail{
-			InputTokens: cc.Usage.PromptTokens, OutputTokens: cc.Usage.CompletionTokens,
-			TotalTokens: cc.Usage.TotalTokens,
-		}
+		resp.Usage = &types.UsageDetail{InputTokens: cc.Usage.PromptTokens, OutputTokens: cc.Usage.CompletionTokens, TotalTokens: cc.Usage.TotalTokens}
 	}
 	return resp
 }
@@ -453,13 +477,19 @@ func chatToolsFromResponses(items []types.ToolItem) []types.Tool {
 	out := make([]types.Tool, 0, len(items))
 	for _, it := range items {
 		if it.Type == "function" {
-			out = append(out, types.Tool{
-				Type: "function",
-				Function: types.FunctionDef{
-					Name: it.Name, Description: it.Description, Parameters: it.Parameters,
-				},
-			})
+			out = append(out, types.Tool{Type: "function", Function: types.FunctionDef{Name: it.Name, Description: it.Description, Parameters: it.Parameters}})
 		}
 	}
 	return out
 }
+
+func extractConvID(req types.ResponsesRequest) string {
+	switch v := req.Conversation.(type) {
+	case string: return v
+	case map[string]any:
+		if id, ok := v["id"].(string); ok { return id }
+	}
+	return ""
+}
+
+func strPtr(s string) *string { return &s }

@@ -63,12 +63,14 @@ type Usage struct {
 }
 
 type ChatCompletionResponse struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
+	ID          string   `json:"id"`
+	Object      string   `json:"object"`
+	Created     int64    `json:"created"`
+	Model       string   `json:"model"`
+	ServiceTier string   `json:"service_tier,omitempty"`
+	SystemFingerprint string `json:"system_fingerprint,omitempty"`
+	Choices     []Choice `json:"choices"`
+	Usage       Usage    `json:"usage"`
 }
 
 // --------- 流式类型 ---------
@@ -91,6 +93,7 @@ type StreamChunk struct {
 	Created int64         `json:"created"`
 	Model   string        `json:"model"`
 	Choices []ChunkChoice `json:"choices"`
+	Usage   Usage         `json:"usage,omitempty"`
 }
 
 // --------- /v1/models ---------
