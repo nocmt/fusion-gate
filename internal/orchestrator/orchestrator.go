@@ -6,33 +6,34 @@ import (
 	"strings"
 	"sync"
 
+	"fusiongate/internal/cache"
 	"fusiongate/internal/client"
 	"fusiongate/internal/config"
 	"fusiongate/internal/logger"
 	"fusiongate/internal/types"
 )
 
-// Orchestrator 是多模型融合引擎。
+// Orchestrator is the multi-model fusion engine.
 //
-// 协作流程：
-//   1. 审查模型判断任务复杂度（简单→直接回答，复杂→多子模型协同）
-//   2. 复杂任务：子模型提供解法分析，审查模型审核合成
-//   3. 审查模型独占工具调用权，决定最终输出
+// Flow:
+//   1. Classify task complexity (simple → direct, complex → multi-worker)
+//   2. Complex: workers provide analysis, reviewer synthesizes + executes tools
+//   3. Response cache avoids redundant API calls for repeated queries
 type Orchestrator struct {
 	cfg     *config.Config
 	clients map[string]*client.Client
+	cache   *cache.Store
 	log     *logger.Logger
 }
 
-func New(cfg *config.Config, log *logger.Logger) *Orchestrator {
+func New(cfg *config.Config, c *cache.Store, log *logger.Logger) *Orchestrator {
 	clients := make(map[string]*client.Client, len(cfg.Providers))
 	for _, p := range cfg.Providers {
 		clients[p.Name] = client.New(p, log)
 	}
-	return &Orchestrator{cfg: cfg, clients: clients, log: log}
+	return &Orchestrator{cfg: cfg, clients: clients, cache: c, log: log}
 }
 
-// Run 执行一次非流式请求。自动判断简单/复杂任务。
 func (o *Orchestrator) Run(
 	ctx context.Context,
 	req types.ChatCompletionRequest,
@@ -40,40 +41,48 @@ func (o *Orchestrator) Run(
 ) (*types.ChatCompletionResponse, error) {
 	group, reviewerCli := o.resolveGroup(ictx.GroupName)
 	if reviewerCli == nil {
-		return nil, fmt.Errorf("分组 %q 的审查模型未找到", ictx.GroupName)
+		return nil, fmt.Errorf("group %q reviewer not found", ictx.GroupName)
 	}
 
-	providers := group.Providers
-
-	// 无子模型配置 → 直接回答
-	if len(providers) == 0 {
-		return reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
+	// 缓存去重
+	ck := cache.Key(req.Messages, ictx.Tools, ictx.GroupName, req.Model)
+	if cached, ok := o.cache.Get(ck); ok {
+		o.log.Info("缓存命中 (hit=%d)", 1)
+		return cached, nil
 	}
 
-	// 自适应判断：简单任务直接回答，复杂任务走融合
+	if len(group.Providers) == 0 {
+		resp, err := reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
+		if err == nil { o.cache.Set(ck, resp) }
+		return resp, err
+	}
+
+	// 自适应复杂度
 	complexity := o.classifyComplexity(ctx, req, reviewerCli)
-	o.log.Info("任务复杂度: %s", complexity)
+	o.log.Info("complexity=%s", complexity)
 
 	if complexity == "simple" {
-		return reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
+		resp, err := reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
+		if err == nil { o.cache.Set(ck, resp) }
+		return resp, err
 	}
 
-	// 复杂任务：完整融合流程
+	// 复杂：多子模型融合
 	workerResults := o.callWorkersParallel(ctx, req, group, ictx.Tools)
 	if len(workerResults) == 0 {
-		return reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
+		resp, err := reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
+		if err == nil { o.cache.Set(ck, resp) }
+		return resp, err
 	}
 
-	synthMessages := o.buildReviewerPrompt(req, workerResults, ictx.Tools)
-	resp, err := reviewerCli.Chat(ctx, synthMessages, req.Temperature, req.MaxTokens, ictx.Tools)
-	if err != nil {
-		return nil, fmt.Errorf("审查模型合成失败: %w", err)
-	}
-	o.log.Info("融合完成: %d 个子模型参与", len(workerResults))
+	synthMsgs := o.buildReviewerPrompt(req, workerResults, ictx.Tools)
+	resp, err := reviewerCli.Chat(ctx, synthMsgs, req.Temperature, req.MaxTokens, ictx.Tools)
+	if err != nil { return nil, fmt.Errorf("reviewer synthesis failed: %w", err) }
+	o.cache.Set(ck, resp)
+	o.log.Info("fusion complete: %d workers", len(workerResults))
 	return resp, nil
 }
 
-// RunStream 执行流式请求。
 func (o *Orchestrator) RunStream(
 	ctx context.Context,
 	req types.ChatCompletionRequest,
@@ -81,11 +90,10 @@ func (o *Orchestrator) RunStream(
 ) (<-chan types.StreamChunk, error) {
 	group, reviewerCli := o.resolveGroup(ictx.GroupName)
 	if reviewerCli == nil {
-		return nil, fmt.Errorf("分组 %q 的审查模型未找到", ictx.GroupName)
+		return nil, fmt.Errorf("group %q reviewer not found", ictx.GroupName)
 	}
 
-	providers := group.Providers
-	if len(providers) == 0 {
+	if len(group.Providers) == 0 {
 		return reviewerCli.ChatStream(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
 	}
 
@@ -99,27 +107,27 @@ func (o *Orchestrator) RunStream(
 		return reviewerCli.ChatStream(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
 	}
 
-	synthMessages := o.buildReviewerPrompt(req, workerResults, ictx.Tools)
-	return reviewerCli.ChatStream(ctx, synthMessages, req.Temperature, req.MaxTokens, ictx.Tools)
+	synthMsgs := o.buildReviewerPrompt(req, workerResults, ictx.Tools)
+	return reviewerCli.ChatStream(ctx, synthMsgs, req.Temperature, req.MaxTokens, ictx.Tools)
 }
 
-// ---- 复杂度分类 ----
+// ---- complexity classification ----
 
 func (o *Orchestrator) classifyComplexity(
 	ctx context.Context, req types.ChatCompletionRequest, cli *client.Client,
 ) string {
-	// 启发式预判：极短的问题 → simple
 	userText := ""
 	for _, m := range req.Messages {
 		if m.Role == "user" { userText += m.Content }
 	}
+	// heuristic pre-check
 	if len([]rune(userText)) < 40 {
 		return o.finalClassify(ctx, userText, cli)
 	}
-	if strings.Contains(userText, "设计") || strings.Contains(userText, "架构") ||
-		strings.Contains(userText, "design") || strings.Contains(userText, "implement") ||
-		len([]rune(userText)) > 500 {
-		return "complex" // 明显复杂，跳过分类调用
+	if strings.Contains(userText, "design") || strings.Contains(userText, "architect") ||
+		strings.Contains(userText, "implement") || strings.Contains(userText, "设计") ||
+		strings.Contains(userText, "架构") || len([]rune(userText)) > 500 {
+		return "complex"
 	}
 	return o.finalClassify(ctx, userText, cli)
 }
@@ -127,33 +135,52 @@ func (o *Orchestrator) classifyComplexity(
 func (o *Orchestrator) finalClassify(ctx context.Context, userText string, cli *client.Client) string {
 	msg := types.Message{
 		Role: "system",
-		Content: `只回答一个词:simple或complex。
-
-simple: 简单问题、单一知识点、代码片段、小修小补
-complex: 多步骤、需架构设计、跨文件开发、系统级方案
-
-问题: ` + userText,
+		Content: "Answer exactly one word: simple or complex.\n\n" +
+			"simple: trivial question, single concept, short snippet, minor fix\n" +
+			"complex: multi-step, architectural design, multi-file, system-level\n\n" +
+			"Task: " + userText,
 	}
 	resp, err := cli.Chat(ctx, []types.Message{msg}, nil, nil, nil)
-	if err != nil {
-		o.log.Debug("复杂度分类失败，默认 complex: %v", err)
-		return "complex"
-	}
+	if err != nil { return "complex" }
 	if len(resp.Choices) == 0 { return "complex" }
-	answer := strings.TrimSpace(strings.ToLower(resp.Choices[0].Message.Content))
-	if strings.Contains(answer, "simple") { return "simple" }
+	if strings.Contains(strings.ToLower(resp.Choices[0].Message.Content), "simple") { return "simple" }
 	return "complex"
 }
 
-// ---- 内部 ----
+// ---- worker prompt (English for higher accuracy) ----
+
+func buildWorkerSystemPrompt(providerName string) string {
+	return fmt.Sprintf(
+		"You are the %s model, serving as a domain expert on a review panel.\n\n"+
+			"Instructions:\n"+
+			"1. Provide your best solution or analysis for the user's problem.\n"+
+			"2. Be thorough: cover edge cases, performance implications, and trade-offs.\n"+
+			"3. If you need a tool (e.g. read_file, run_command), mention it explicitly:\n"+
+			"   \"I recommend calling read_file(path='/x/y') to check the existing implementation.\"\n"+
+			"   The reviewer will evaluate your request and execute the tool if approved.\n"+
+			"4. Output your answer directly — do NOT use function_call or tool_calls.",
+		providerName,
+	)
+}
+
+func buildToolNotice(tools []types.Tool) string {
+	if len(tools) == 0 { return "" }
+	var sb strings.Builder
+	sb.WriteString("[Available Tools]\n")
+	sb.WriteString("You do NOT have direct access to these tools. To request a tool call,\n")
+	sb.WriteString("describe what you need in your response (e.g. \"I recommend calling...\").\n")
+	sb.WriteString("The reviewer model will evaluate and execute if approved.\n\n")
+	for _, t := range tools {
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", t.Function.Name, t.Function.Description))
+	}
+	return sb.String()
+}
+
+// ---- internal ----
 
 func (o *Orchestrator) resolveGroup(groupName string) (config.Group, *client.Client) {
 	group, ok := o.cfg.Group(groupName)
-	if !ok {
-		if len(o.cfg.Groups) > 0 {
-			group = o.cfg.Groups[0]
-		}
-	}
+	if !ok && len(o.cfg.Groups) > 0 { group = o.cfg.Groups[0] }
 	reviewerCli, ok := o.clients[group.Reviewer]
 	if !ok && len(o.cfg.Groups) > 0 {
 		group = o.cfg.Groups[0]
@@ -175,44 +202,51 @@ func (o *Orchestrator) callWorkersParallel(
 	providers := group.Providers
 	if len(providers) == 0 { return nil }
 
-	toolNotice := buildToolNotice(clientTools)
+	// 去重：相同子任务只发一次请求
+	taskHashes := make(map[string]string) // hash → provider_name
+	deduped := make([]struct{ name string; msg []types.Message }, 0)
+	for _, pn := range providers {
+		h := cache.Key(req.Messages, nil, "", pn)
+		if first, exists := taskHashes[h]; exists {
+			o.log.Debug("worker dedup: %s shares result with %s", pn, first)
+			continue
+		}
+		taskHashes[h] = pn
+		wm := make([]types.Message, 0, len(req.Messages)+2)
+		if notice := buildToolNotice(clientTools); notice != "" {
+			wm = append(wm, types.Message{Role: "system", Content: notice})
+		}
+		wm = append(wm, types.Message{Role: "system", Content: buildWorkerSystemPrompt(pn)})
+		wm = append(wm, req.Messages...)
+		deduped = append(deduped, struct {
+			name string
+			msg  []types.Message
+		}{pn, wm})
+	}
 
-	rc := make(chan workerResult, len(providers))
+	if len(deduped) < len(providers) {
+		o.log.Info("worker dedup: %d/%d unique tasks", len(deduped), len(providers))
+	}
+
+	rc := make(chan workerResult, len(deduped))
 	var wg sync.WaitGroup
 
-	for _, pn := range providers {
-		cli, ok := o.clients[pn]
+	for _, d := range deduped {
+		cli, ok := o.clients[d.name]
 		if !ok { continue }
 		wg.Add(1)
-		go func(name string, c *client.Client) {
+		go func(name string, c *client.Client, msgs []types.Message) {
 			defer wg.Done()
-			workerMessages := make([]types.Message, 0, len(req.Messages)+2)
-			if toolNotice != "" {
-				workerMessages = append(workerMessages, types.Message{
-					Role: "system", Content: toolNotice,
-				})
-			}
-			workerMessages = append(workerMessages, types.Message{
-				Role: "system",
-				Content: fmt.Sprintf(
-					"你是 %s 模型，作为专家组成员。请针对用户问题提供最优解法。如需工具，在回答中说明即可，审查模型会评估后调用。",
-					name,
-				),
-			})
-			workerMessages = append(workerMessages, req.Messages...)
-			resp, err := c.Chat(ctx, workerMessages, req.Temperature, req.MaxTokens, nil)
+			resp, err := c.Chat(ctx, msgs, req.Temperature, req.MaxTokens, nil)
 			rc <- workerResult{name: name, resp: resp, err: err}
-		}(pn, cli)
+		}(d.name, cli, d.msg)
 	}
 	wg.Wait()
 	close(rc)
 
 	var out []workerResult
 	for r := range rc {
-		if r.err != nil {
-			o.log.Warn("子模型 %s 调用失败: %v", r.name, r.err)
-			continue
-		}
+		if r.err != nil { o.log.Warn("worker %s failed: %v", r.name, r.err); continue }
 		out = append(out, r)
 	}
 	return out
@@ -222,39 +256,29 @@ func (o *Orchestrator) buildReviewerPrompt(
 	req types.ChatCompletionRequest, workers []workerResult, tools []types.Tool,
 ) []types.Message {
 	var sb strings.Builder
-	sb.WriteString("你是审查模型（组长）。以下是各子模型针对用户问题的分析。请：\n")
-	sb.WriteString("1. 逐一审核每个子模型的回答\n")
-	sb.WriteString("2. 综合优点，给出最优最终答案\n")
-	sb.WriteString("3. 如需文件操作、命令执行等，使用 function_call\n\n")
-	sb.WriteString("--- 子模型分析 ---\n\n")
+	sb.WriteString("You are the reviewer (lead). Below are analyses from panel experts.\n\n")
+	sb.WriteString("Instructions:\n")
+	sb.WriteString("1. Review each expert's answer — note strengths and weaknesses.\n")
+	sb.WriteString("2. Synthesize the best parts into one optimal final answer.\n")
+	sb.WriteString("3. If file operations or commands are needed, use function_call.\n\n")
+	sb.WriteString("--- Expert Analyses ---\n\n")
 
 	for i, w := range workers {
 		content := ""
 		if len(w.resp.Choices) > 0 { content = w.resp.Choices[0].Message.Content }
-		sb.WriteString(fmt.Sprintf("【子模型 %d: %s】\n%s\n\n", i+1, w.name, content))
+		sb.WriteString(fmt.Sprintf("[Expert %d: %s]\n%s\n\n", i+1, w.name, content))
 	}
 
-	sb.WriteString("--- 用户原始问题 ---\n")
+	sb.WriteString("--- Original User Request ---\n")
 	for _, m := range req.Messages {
 		if m.Role == "user" { sb.WriteString(m.Content + "\n") }
 	}
-	sb.WriteString("\n请给出最终答案。如需调用工具，使用 function_call。")
+	sb.WriteString("\nProvide the final answer. Use function_call for tool operations if needed.")
 
 	out := []types.Message{
-		{Role: "system", Content: "你是 FusionGate 审查模型，审核子模型分析并输出最终答案。有全部工具调用权限。"},
+		{Role: "system", Content: "You are the FusionGate reviewer. Synthesize expert analyses into a final answer. You have full tool access."},
 	}
 	out = append(out, req.Messages...)
 	out = append(out, types.Message{Role: "user", Content: sb.String()})
 	return out
-}
-
-func buildToolNotice(tools []types.Tool) string {
-	if len(tools) == 0 { return "" }
-	var sb strings.Builder
-	sb.WriteString("【可用工具】（你无权直接调用，只能通过审查模型申请）\n")
-	for _, t := range tools {
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", t.Function.Name, t.Function.Description))
-	}
-	sb.WriteString("\n如需以上工具，在回答中说明'建议调用 xxx(参数)'，审查模型评估后执行。")
-	return sb.String()
 }

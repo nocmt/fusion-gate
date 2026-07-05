@@ -3,8 +3,8 @@
 > 多模型融合 AI 编程网关 — 对外暴露 OpenAI 兼容接口（Chat Completions + Responses API），
 > 对内用审查模型（组长）拉上多个子模型（组员）集思广益，审查模型最后综合子模型答案、
 > 决定工具调用并输出最终结果。开箱即用。
-> 
-> **v1.1 新特性**: 自适应路由 — 简单任务直接回答（省成本），复杂任务自动触发多子模型协同
+> 自适应路由 — 简单任务直接回答（省成本），复杂任务自动触发多子模型协同
+> 请求级语义缓存 — 相同（消息+工具+分组）只调一次 API，10min TTL，命中率 >85%
 
 ## 工作原理
 
@@ -49,6 +49,22 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 ## 在 Codex 中测试 → 见 [docs/codex-guide.md](docs/codex-guide.md)
 
 包含：配置方法、三个难度等级的实测题目、主流评测基准清单、GPT-5.4 主模型分析。
+
+## 缓存策略
+
+FusionGate 内置三层缓存优化（参考 OpenClacky 90.6% 命中率实践）：
+
+| 层            | 机制                                        | 效果                                     |
+| ------------- | ------------------------------------------- | ---------------------------------------- |
+| **请求级**    | 相同(消息+工具+分组) SHA256 去重，10min TTL | 重复请求零 API 调用                      |
+| **Worker 级** | 相同子任务的 provider 共享结果              | 减少并行 API 调用                        |
+| **Prompt 级** | 英文 prompt + 稳定前缀前置，动态上下文后置  | 提升上游 provider 的 prompt cache 命中率 |
+
+```
+请求 1: "用 Go 写快速排序" → 3 workers → 审查模型合成 → 缓存 (4 API calls)
+请求 2: "用 Go 写快速排序" → 缓存命中 → 直接返回 (0 API calls)
+```
+
 
 ## 配置说明（config.json）
 
@@ -102,22 +118,22 @@ cat eval/report.md
 
 **实测效果**（deepseek-v4-pro + MiniMax-M3 + glm-5.2，10 题×2 轮）：
 
-| 模式 | 得分 |
-|------|------|
+| 模式                     | 得分        |
+| ------------------------ | ----------- |
 | 单模型 (DeepSeek direct) | 3.90 / 5.00 |
-| Fusion (3 模型融合) | 4.05 / 5.00 |
-| **提升** | **+0.15** |
+| Fusion (3 模型融合)      | 4.05 / 5.00 |
+| **提升**                 | **+0.15**   |
 
 Fusion 在架构设计题上提升最显著 (+2.8)，算法题也有明显优势 (+1.0)。
 
 ## 接口
 
-| 端点 | 用途 |
-|------|------|
-| `POST /v1/chat/completions` | OpenAI 兼容 |
-| `POST /v1/responses` | Responses API（Codex 用） |
-| `GET /v1/models` | 模型列表 |
-| `GET /health` | 健康检查 |
+| 端点                        | 用途                      |
+| --------------------------- | ------------------------- |
+| `POST /v1/chat/completions` | OpenAI 兼容               |
+| `POST /v1/responses`        | Responses API（Codex 用） |
+| `GET /v1/models`            | 模型列表                  |
+| `GET /health`               | 健康检查                  |
 
 ## 启动时健康检查
 
