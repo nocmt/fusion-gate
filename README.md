@@ -37,6 +37,8 @@ Codex ──POST /v1/responses──▶ FusionGate
 go build -o fusiongate ./cmd/fusiongate/
 go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
+Or, you can run `build.sh` with one click to package binary files for multiple platforms.
+
 # Fill in config.json with real API keys
 
 # Start (auto health-checks every provider; results encrypted & cached to /tmp)
@@ -53,11 +55,11 @@ Includes: setup instructions, three difficulty levels of test prompts, benchmark
 
 Three-layer cache optimization (inspired by OpenClacky's 90.6% hit-rate practice):
 
-| Layer | Mechanism | Impact |
-|-------|-----------|--------|
-| **Request-level** | SHA256(messages + tools + group) dedup, 10min TTL | Zero API calls on repeats |
-| **Worker-level** | Identical sub-tasks share one provider call | Less parallel API usage |
-| **Prompt-level** | English prompts + stable prefix first, dynamic context last | Boosts upstream prompt cache hits |
+| Layer             | Mechanism                                                   | Impact                            |
+| ----------------- | ----------------------------------------------------------- | --------------------------------- |
+| **Request-level** | SHA256(messages + tools + group) dedup, 10min TTL           | Zero API calls on repeats         |
+| **Worker-level**  | Identical sub-tasks share one provider call                 | Less parallel API usage           |
+| **Prompt-level**  | English prompts + stable prefix first, dynamic context last | Boosts upstream prompt cache hits |
 
 ```
 Request 1: "Write quicksort in Go" → 3 workers → reviewer synthesis → cached (4 API calls)
@@ -113,22 +115,22 @@ cat eval/report.md
 
 **Benchmark results** (deepseek-v4-pro + MiniMax-M3 + glm-5.2, 10 questions × 2 rounds):
 
-| Mode | Score |
-|------|-------|
-| Single (DeepSeek direct) | 3.90 / 5.00 |
+| Mode                      | Score       |
+| ------------------------- | ----------- |
+| Single (DeepSeek direct)  | 3.90 / 5.00 |
 | Fusion (3-model ensemble) | 4.05 / 5.00 |
-| **Delta** | **+0.15** |
+| **Delta**                 | **+0.15**   |
 
 Fusion shows the strongest gains on architecture design questions (+2.8) and algorithm tasks (+1.0).
 
 ## Endpoints
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /v1/chat/completions` | OpenAI-compatible |
-| `POST /v1/responses` | Responses API (for Codex) |
-| `GET /v1/models` | Model list |
-| `GET /health` | Health check |
+| Endpoint                    | Purpose                   |
+| --------------------------- | ------------------------- |
+| `POST /v1/chat/completions` | OpenAI-compatible         |
+| `POST /v1/responses`        | Responses API (for Codex) |
+| `GET /v1/models`            | Model list                |
+| `GET /health`               | Health check              |
 
 ## Startup Health Check
 

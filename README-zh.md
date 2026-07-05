@@ -37,6 +37,8 @@ Codex ──POST /v1/responses──▶ FusionGate
 go build -o fusiongate ./cmd/fusiongate/
 go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
+或者一键执行`build.sh`，即可打包多个平台的二进制文件了。
+
 # 填写 config.json，填入真实 API Key
 
 # 启动（自动健康检查，结果 AES 加密缓存到 /tmp）
@@ -53,11 +55,11 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
 三层缓存优化（参考 OpenClacky 90.6% 命中率实践）：
 
-| 层 | 机制 | 效果 |
-|----|------|------|
-| **请求级** | SHA256(消息+工具+分组) 去重，10min TTL | 重复请求零 API 调用 |
-| **Worker 级** | 相同子任务的 provider 共享结果 | 减少并行调用 |
-| **Prompt 级** | 英文 prompt + 稳定前缀前置 | 提升上游 prompt cache 命中率 |
+| 层            | 机制                                   | 效果                         |
+| ------------- | -------------------------------------- | ---------------------------- |
+| **请求级**    | SHA256(消息+工具+分组) 去重，10min TTL | 重复请求零 API 调用          |
+| **Worker 级** | 相同子任务的 provider 共享结果         | 减少并行调用                 |
+| **Prompt 级** | 英文 prompt + 稳定前缀前置             | 提升上游 prompt cache 命中率 |
 
 ```
 请求 1: "用 Go 写快速排序" → 3 workers → 审查模型合成 → 缓存 (4 次 API)
@@ -113,22 +115,22 @@ cat eval/report.md
 
 **实测效果**（deepseek-v4-pro + MiniMax-M3 + glm-5.2，10 题 × 2 轮）：
 
-| 模式 | 得分 |
-|------|------|
+| 模式                     | 得分        |
+| ------------------------ | ----------- |
 | 单模型 (DeepSeek direct) | 3.90 / 5.00 |
-| Fusion (3 模型融合) | 4.05 / 5.00 |
-| **差值** | **+0.15** |
+| Fusion (3 模型融合)      | 4.05 / 5.00 |
+| **差值**                 | **+0.15**   |
 
 Fusion 在架构设计题上提升最显著 (+2.8)，算法题也有明显优势 (+1.0)。
 
 ## 接口
 
-| 端点 | 用途 |
-|------|------|
-| `POST /v1/chat/completions` | OpenAI 兼容 |
-| `POST /v1/responses` | Responses API（Codex 用） |
-| `GET /v1/models` | 模型列表 |
-| `GET /health` | 健康检查 |
+| 端点                        | 用途                      |
+| --------------------------- | ------------------------- |
+| `POST /v1/chat/completions` | OpenAI 兼容               |
+| `POST /v1/responses`        | Responses API（Codex 用） |
+| `GET /v1/models`            | 模型列表                  |
+| `GET /health`               | 健康检查                  |
 
 ## 启动时健康检查
 
