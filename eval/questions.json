@@ -1,0 +1,125 @@
+{
+  "config": {
+    "gateway": "http://localhost:8086",
+    "single_group": "single",
+    "fusion_group": "coding_expert",
+    "rounds": 2,
+    "timeout_seconds": 300,
+    "judge_timeout_seconds": 180
+  },
+  "questions": [
+    {
+      "id": "algo_01",
+      "category": "algorithm",
+      "difficulty": "easy",
+      "prompt": "用 Go 实现快速排序，要求 in-place 操作。只给出核心函数代码，不要多余解释。",
+      "eval_criteria": [
+        "代码能否正确编译运行",
+        "是否正确实现了分治逻辑",
+        "是否为 in-place 实现",
+        "是否处理了空数组、单元素数组等边界情况"
+      ]
+    },
+    {
+      "id": "algo_02",
+      "category": "algorithm",
+      "difficulty": "medium",
+      "prompt": "用 Go 实现一个线程安全的 LRU 缓存，支持 Get 和 Put 操作，O(1) 时间复杂度。给出完整可运行的代码。",
+      "eval_criteria": [
+        "Get 和 Put 是否都是 O(1)",
+        "是否正确处理并发安全",
+        "是否实现了正确的 LRU 淘汰逻辑",
+        "代码是否使用了 sync.Mutex 或等效机制"
+      ]
+    },
+    {
+      "id": "debug_01",
+      "category": "debugging",
+      "difficulty": "medium",
+      "prompt": "以下 Go 代码有一个并发 bug，请指出问题并给出修复方案：\n\nvar counter int\nvar wg sync.WaitGroup\nfor i := 0; i < 1000; i++ {\n    wg.Add(1)\n    go func() {\n        counter++\n        wg.Done()\n    }()\n}\nwg.Wait()\nfmt.Println(counter)",
+      "eval_criteria": [
+        "是否准确指出了 data race 问题",
+        "修复方案是否完整",
+        "是否解释了为什么会出现问题",
+        "是否给出了可直接使用的修正代码"
+      ]
+    },
+    {
+      "id": "debug_02",
+      "category": "debugging",
+      "difficulty": "hard",
+      "prompt": "以下 Go HTTP 服务在一定并发下出现 goroutine 泄漏。请分析原因并修复：\n\nfunc handler(w http.ResponseWriter, r *http.Request) {\n    ch := make(chan string)\n    go func() {\n        result := fetchFromDB(r.Context())\n        ch <- result\n    }()\n    select {\n    case result := <-ch:\n        w.Write([]byte(result))\n    case <-time.After(5 * time.Second):\n        http.Error(w, \"timeout\", 504)\n    }\n}",
+      "eval_criteria": [
+        "是否指出了 goroutine 在超时后仍在运行",
+        "是否解释了 channel 无缓冲导致的泄漏",
+        "修复方案是否正确"
+      ]
+    },
+    {
+      "id": "design_01",
+      "category": "architecture",
+      "difficulty": "hard",
+      "prompt": "设计一个支持百万级并发连接的实时消息推送系统。请给出：1.整体架构（文字描述）2.关键技术选型和理由 3.连接管理策略 4.消息路由方案。用中文回答。",
+      "eval_criteria": [
+        "架构设计是否合理可扩展",
+        "技术选型是否有充分理由",
+        "是否考虑了单点故障和水平扩展"
+      ]
+    },
+    {
+      "id": "design_02",
+      "category": "architecture",
+      "difficulty": "medium",
+      "prompt": "为一个电商系统设计数据库 schema，需支持：用户、商品、订单、库存、优惠券。给出核心表结构和关键索引。用 SQL DDL 写出。",
+      "eval_criteria": [
+        "表结构是否完整覆盖了所有实体",
+        "外键和约束是否合理",
+        "索引设计是否覆盖了高频查询"
+      ]
+    },
+    {
+      "id": "tool_01",
+      "category": "tool_use",
+      "difficulty": "medium",
+      "prompt": "我需要创建一个 Go 项目包含：main.go（HTTP 服务入口）、handler/user.go（用户 CRUD）、model/user.go（用户模型）。请为每个文件生成代码，最后告诉我目录结构。",
+      "eval_criteria": [
+        "是否生成了所有三个文件的代码",
+        "代码之间是否保持一致",
+        "是否正确处理了路由和依赖"
+      ]
+    },
+    {
+      "id": "code_01",
+      "category": "implementation",
+      "difficulty": "easy",
+      "prompt": "用 Go 写一个函数，读取一个 JSON 文件，解析为 map[string]any，然后按 key 排序输出所有键值对。给出完整代码。",
+      "eval_criteria": [
+        "代码能否正确处理 JSON 文件读取和解析",
+        "是否按 key 排序输出了键值对",
+        "错误处理是否完善"
+      ]
+    },
+    {
+      "id": "code_02",
+      "category": "implementation",
+      "difficulty": "medium",
+      "prompt": "用 Go 实现一个 worker pool：启动 N 个 goroutine 作为 worker，从 channel 接收任务执行，支持优雅关闭。给出完整代码和注释。",
+      "eval_criteria": [
+        "是否正确实现了 worker pool 模式",
+        "是否支持优雅关闭",
+        "是否正确使用了 channel 和 WaitGroup"
+      ]
+    },
+    {
+      "id": "refactor_01",
+      "category": "refactoring",
+      "difficulty": "medium",
+      "prompt": "重构以下 Go 函数，使其符合单一职责和开闭原则，添加错误处理：\n\nfunc ProcessOrder(order Order) error {\n    if order.Amount > 1000 { order.Discount = 0.1 }\n    if order.Amount > 5000 { order.Discount = 0.2 }\n    order.Total = order.Amount * (1 - order.Discount)\n    if err := db.Save(order); err != nil { return err }\n    return email.Send(order.Email, \"订单确认\", order.Total)\n}",
+      "eval_criteria": [
+        "是否拆分成了独立的职责",
+        "折扣计算逻辑是否可扩展",
+        "错误处理是否完善"
+      ]
+    }
+  ]
+}

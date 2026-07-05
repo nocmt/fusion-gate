@@ -1,0 +1,35 @@
+# 二进制文件
+fusiongate
+fusiongate-bench
+
+# 配置文件
+config.json
+
+# 评测结果（可能含敏感内容）
+eval/results.json
+eval/scores.json
+eval/report.json
+
+# 健康检查缓存（加密的，但也不该提交）
+/tmp/fusiongate_health_check
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Go
+*.test
+*.out
+
+# 日志
+*.log
+
+# 加密缓存
+fusiongate_health_check
+.workbuddy

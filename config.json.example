@@ -1,0 +1,59 @@
+{
+  "providers": [
+    {
+      "name": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "model_name": "deepseek-v4-pro",
+      "api_key": "",
+      "context_length": 1000000,
+      "output_length": 384000,
+      "input_token_price": 0.435,
+      "cached_token_price": 0.003625,
+      "output_token_price": 0.87
+    },
+    {
+      "name": "minimax",
+      "base_url": "https://api.minimaxi.com/v1",
+      "model_name": "MiniMax-M3",
+      "api_key": "",
+      "context_length": 1000000,
+      "output_length": 1000000,
+      "input_token_price": 0.30,
+      "cached_token_price": 0.06,
+      "output_token_price": 1.20
+    },
+    {
+      "name": "glm",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "model_name": "glm-5.2",
+      "api_key": "",
+      "context_length": 1000000,
+      "output_length": 131072,
+      "input_token_price": 1.40,
+      "cached_token_price": 0.26,
+      "output_token_price": 4.40
+    }
+  ],
+  "groups": [
+    {
+      "name": "coding_expert",
+      "reviewer": "deepseek",
+      "providers": [
+        "deepseek",
+        "minimax",
+        "glm"
+      ]
+    },
+    {
+      "name": "single",
+      "reviewer": "deepseek",
+      "providers": []
+    }
+  ],
+  "log_level": "info",
+  "cli": {
+    "language": "zh-CN",
+    "port": 8086,
+    "host": "0.0.0.0"
+  }
+}
