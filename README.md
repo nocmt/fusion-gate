@@ -76,11 +76,11 @@ See `config.json.example` for a full annotated example with all three provider A
 | `base_url`           | ✅¹       | —        | Base URL (e.g. `https://api.deepseek.com/v1`)                                                   |
 | `full_url`           | —        | —        | **Highest priority**. Overrides `base_url` + `type`. Use this to point directly to any endpoint |
 | `type`               | —        | `"chat"` | API format: `"chat"` (Chat Completions) or `"responses"` (Responses API)                        |
-| `context_length`     | ⓟ       | `0`      | Max context window (tokens). Auto-filled from pricing DB                      |
-| `output_length`      | ⓟ       | `0`      | Max output tokens. Auto-filled from pricing DB                               |
-| `input_token_price`  | ⓟ       | `0`      | Price per input token (USD). Auto-filled from pricing DB                     |
-| `cached_token_price` | ⓟ       | `0`      | Price per cached token (USD). Auto-filled from pricing DB                    |
-| `output_token_price` | ⓟ       | `0`      | Price per output token (USD). Auto-filled from pricing DB                    |
+| `context_length`     | ⓟ        | `0`      | Max context window (tokens). Auto-filled from pricing DB                                        |
+| `output_length`      | ⓟ        | `0`      | Max output tokens. Auto-filled from pricing DB                                                  |
+| `input_token_price`  | ⓟ        | `0`      | Price per input token (USD). Auto-filled from pricing DB                                        |
+| `cached_token_price` | ⓟ        | `0`      | Price per cached token (USD). Auto-filled from pricing DB                                       |
+| `output_token_price` | ⓟ        | `0`      | Price per output token (USD). Auto-filled from pricing DB                                       |
 
 > ⓟ = auto-filled from [LiteLLM pricing DB](https://github.com/BerriAI/litellm) (2,400+ models). Omit these to let FusionGate fill them.
 > ¹ `base_url` is required unless `full_url` is set.
@@ -100,26 +100,26 @@ See `config.json.example` for a full annotated example with all three provider A
 
 ### Group fields
 
-| Field       | Required | Default | Description                                                                                                                          |
-| ----------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`      | ✅        | —       | Group name (used as model name by clients)                                                                                           |
-| `reviewer`  | ✅        | —       | Reviewer model — collects & synthesizes worker answers, holds tool authority                                                         |
+| Field       | Required | Default | Description                                                                                                                                                              |
+| ----------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`      | ✅        | —       | Group name (used as model name by clients)                                                                                                                               |
+| `reviewer`  | ✅        | —       | Reviewer model — collects & synthesizes worker answers, holds tool authority                                                                                             |
 | `providers` | ✅        | —       | Worker models — provide analysis only. Must contain at least one provider. *Reviewer does NOT need to be listed here unless you want it to also contribute as a worker.* |
 
 ### Top-level fields
 
-| Field               | Required | Default     | Description                                 |
-| ------------------- | -------- | ----------- | ------------------------------------------- |
-| `providers`         | ✅        | —           | Provider definitions                        |
-| `groups`            | ✅        | —           | Model groups                                |
-| `cli.port`          | —        | `8086`      | Listen port                                 |
-| `cli.host`          | —        | `"0.0.0.0"` | Listen host                                 |
-| `cli.language`      | —        | `"zh-CN"`   | UI language                                 |
-| `session.enabled`   | —        | `false`     | Enable `previous_response_id` tracking      |
-| `session.ttl`       | —        | `"1h"`      | Session expiry                              |
-| `pricing_cache_ttl` | —        | `"72h"`     | Pricing DB cache TTL (`0`=disable)          |
-| `worker_timeout`    | —        | `"10s"`     | Per-worker call timeout; slow workers are skipped to keep Codex interactive |
-| `log_level`         | —        | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"` |
+| Field               | Required | Default     | Description                                                                 |
+| ------------------- | -------- | ----------- | --------------------------------------------------------------------------- |
+| `providers`         | ✅        | —           | Provider definitions                                                        |
+| `groups`            | ✅        | —           | Model groups                                                                |
+| `cli.port`          | —        | `8086`      | Listen port                                                                 |
+| `cli.host`          | —        | `"0.0.0.0"` | Listen host                                                                 |
+| `cli.language`      | —        | `"zh-CN"`   | UI language                                                                 |
+| `session.enabled`   | —        | `false`     | Enable `previous_response_id` tracking                                      |
+| `session.ttl`       | —        | `"1h"`      | Session expiry                                                              |
+| `pricing_cache_ttl` | —        | `"72h"`     | Pricing DB cache TTL (`0`=disable)                                          |
+| `worker_timeout`    | —        | `"40s"`     | Per-worker call timeout; slow workers are skipped to keep Codex interactive |
+| `log_level`         | —        | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"`                                 |
 
 ## Pricing Auto-fill
 
@@ -176,8 +176,8 @@ Fusion shows the strongest gains on architecture design questions (+2.8) and alg
 ## Codex Compatibility Notes
 
 - FusionGate emits official Responses API stream events with a `type` field in every event payload. Text uses `response.output_text.delta` / `.done`, and reviewer tool calls use `response.function_call_arguments.delta` / `.done`.
-- FusionGate always runs workers + reviewer when a group has workers configured. A reviewer-only request is only used as a fallback for groups with no workers.
-- `worker_timeout` defaults to `10s`; any worker that does not respond in time is skipped instead of stalling the whole response.
+- FusionGate strictly runs workers + reviewer: every group must configure at least one worker, and a request with no timely worker result fails instead of degrading into reviewer-only single-model output.
+- `worker_timeout` defaults to `40s`; late workers are skipped, and synthesis continues when at least one worker has returned.
 - SSE headers include `X-Accel-Buffering: no` to avoid proxy buffering, and internal progress is sent as SSE comments so Codex does not mistake FusionGate status for model output.
 
 ## Startup Health Check

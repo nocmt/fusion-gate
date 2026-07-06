@@ -49,11 +49,7 @@ func (o *Orchestrator) Run(
 	}
 
 	if len(group.Providers) == 0 {
-		resp, err := reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
-		if err == nil {
-			o.cache.Set(ck, resp)
-		}
-		return resp, err
+		return nil, fmt.Errorf("group %q has no worker providers; FusionGate requires at least one expert opinion", group.Name)
 	}
 
 	workerRc := o.callWorkersParallel(ctx, req, group, ictx.Tools)
@@ -62,11 +58,7 @@ func (o *Orchestrator) Run(
 		workerResults = append(workerResults, r)
 	}
 	if len(workerResults) == 0 {
-		resp, err := reviewerCli.Chat(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
-		if err == nil {
-			o.cache.Set(ck, resp)
-		}
-		return resp, err
+		return nil, fmt.Errorf("no expert responded in time; strict fusion requires at least one worker result")
 	}
 
 	synthMsgs := o.buildReviewerPrompt(req, workerResults, ictx.Tools)
@@ -92,8 +84,7 @@ func (o *Orchestrator) RunStream(
 	}
 
 	if len(group.Providers) == 0 {
-		o.log.Info("stream reviewer only: no workers configured")
-		return reviewerCli.ChatStream(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
+		return nil, fmt.Errorf("group %q has no worker providers; FusionGate requires at least one expert opinion", group.Name)
 	}
 
 	ch := make(chan types.StreamChunk, 64)
@@ -165,15 +156,7 @@ func (o *Orchestrator) RunStream(
 		}
 
 		if len(workerResults) == 0 {
-			ch <- statusChunk("FusionGate", "No expert responded in time, falling back to reviewer.")
-			revCh, err := reviewerCli.ChatStream(ctx, req.Messages, req.Temperature, req.MaxTokens, ictx.Tools)
-			if err != nil {
-				ch <- errorChunk(err)
-				return
-			}
-			for c := range revCh {
-				ch <- c
-			}
+			ch <- errorChunk(fmt.Errorf("no expert responded in time; strict fusion requires at least one worker result"))
 			return
 		}
 

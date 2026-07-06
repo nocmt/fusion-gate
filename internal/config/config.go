@@ -77,7 +77,7 @@ type Config struct {
 	PricingTTL    string        `json:"pricing_cache_ttl,omitempty"` // 定价缓存过期时间，默认 "72h"
 	LogLevel      string        `json:"log_level"`
 	CLI           CLI           `json:"cli"`
-	WorkerTimeout string        `json:"worker_timeout,omitempty"` // 工人类调用超时，默认 "10s"
+	WorkerTimeout string        `json:"worker_timeout,omitempty"` // 工人类调用超时，默认 "40s"
 
 	pricingTTLDur    time.Duration
 	workerTimeoutDur time.Duration
@@ -175,7 +175,7 @@ func (c *Config) fillDefaults() {
 		c.PricingTTL = "72h"
 	}
 	if c.WorkerTimeout == "" {
-		c.WorkerTimeout = "10s"
+		c.WorkerTimeout = "40s"
 	}
 	d, err := time.ParseDuration(c.Session.TTL)
 	if err != nil {
@@ -189,7 +189,7 @@ func (c *Config) fillDefaults() {
 	c.pricingTTLDur = d2
 	d3, err3 := time.ParseDuration(c.WorkerTimeout)
 	if err3 != nil {
-		d3 = 10 * time.Second
+		d3 = 20 * time.Second
 	}
 	c.workerTimeoutDur = d3
 }

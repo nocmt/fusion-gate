@@ -301,8 +301,8 @@ func parseResponsesSSE(resp *http.Response, ch chan<- types.StreamChunk, model s
 					}
 				}
 			case "response.completed":
-				var d types.EventResponseCompleted
-				if json.Unmarshal([]byte(data), &d) == nil && d.Usage != nil {
+				d, ok := parseResponseCompletedEvent(data)
+				if ok && d.Usage != nil {
 					ch <- types.StreamChunk{
 						ID: d.ID, Object: "chat.completion.chunk", Model: model,
 						Choices: []types.ChunkChoice{{Index: 0, FinishReason: strPtr("stop")}},
@@ -314,8 +314,8 @@ func parseResponsesSSE(resp *http.Response, ch chan<- types.StreamChunk, model s
 				}
 			case "response.created":
 				if !created {
-					var d types.EventResponseCreated
-					if json.Unmarshal([]byte(data), &d) == nil {
+					d, ok := parseResponseCreatedEvent(data)
+					if ok {
 						ch <- types.StreamChunk{ID: d.ID, Object: "chat.completion.chunk", Model: d.Model,
 							Choices: []types.ChunkChoice{{Index: 0, Delta: types.Delta{Role: "assistant"}}},
 						}
@@ -350,6 +350,34 @@ func eventType(data string) string {
 		return ""
 	}
 	return d.Type
+}
+
+func parseResponseCreatedEvent(data string) (types.EventResponseCreated, bool) {
+	var flat types.EventResponseCreated
+	if json.Unmarshal([]byte(data), &flat) == nil && flat.ID != "" {
+		return flat, true
+	}
+	var wrapped struct {
+		Response types.EventResponseCreated `json:"response"`
+	}
+	if json.Unmarshal([]byte(data), &wrapped) == nil && wrapped.Response.ID != "" {
+		return wrapped.Response, true
+	}
+	return types.EventResponseCreated{}, false
+}
+
+func parseResponseCompletedEvent(data string) (types.EventResponseCompleted, bool) {
+	var flat types.EventResponseCompleted
+	if json.Unmarshal([]byte(data), &flat) == nil && flat.ID != "" {
+		return flat, true
+	}
+	var wrapped struct {
+		Response types.EventResponseCompleted `json:"response"`
+	}
+	if json.Unmarshal([]byte(data), &wrapped) == nil && wrapped.Response.ID != "" {
+		return wrapped.Response, true
+	}
+	return types.EventResponseCompleted{}, false
 }
 
 // ---- 格式转换 ----

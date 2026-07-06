@@ -76,13 +76,13 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 | `base_url`           | ✅¹   | —        | 基础 URL（如 `https://api.deepseek.com/v1`）                            |
 | `full_url`           | —    | —        | **最高优先级**。覆盖 `base_url` + `type`，直接指向任意端点              |
 | `type`               | —    | `"chat"` | API 格式：`"chat"`（Chat Completions）或 `"responses"`（Responses API） |
-| `context_length`     | ⓟ    | `0`      | 最大上下文窗口。由定价库自动填充                                          |
-| `output_length`      | ⓟ    | `0`      | 最大输出 tokens。由定价库自动填充                                         |
-| `context_length`     | ⓟ    | `0`      | 最大上下文窗口。由定价库自动填充                                          |
-| `output_length`      | ⓟ    | `0`      | 最大输出 tokens。由定价库自动填充                                         |
-| `input_token_price`  | ⓟ    | `0`      | 输入 token 单价（USD）。由定价库自动填充                                  |
-| `cached_token_price` | ⓟ    | `0`      | 缓存 token 单价（USD）。由定价库自动填充                                  |
-| `output_token_price` | ⓟ    | `0`      | 输出 token 单价（USD）。由定价库自动填充                                  |
+| `context_length`     | ⓟ    | `0`      | 最大上下文窗口。由定价库自动填充                                        |
+| `output_length`      | ⓟ    | `0`      | 最大输出 tokens。由定价库自动填充                                       |
+| `context_length`     | ⓟ    | `0`      | 最大上下文窗口。由定价库自动填充                                        |
+| `output_length`      | ⓟ    | `0`      | 最大输出 tokens。由定价库自动填充                                       |
+| `input_token_price`  | ⓟ    | `0`      | 输入 token 单价（USD）。由定价库自动填充                                |
+| `cached_token_price` | ⓟ    | `0`      | 缓存 token 单价（USD）。由定价库自动填充                                |
+| `output_token_price` | ⓟ    | `0`      | 输出 token 单价（USD）。由定价库自动填充                                |
 
 > ⓟ = 由 [LiteLLM 定价库](https://github.com/BerriAI/litellm) 自动填充（2400+ 模型）。省略这些字段即可。
 > ¹ 如果设置了 `full_url`，`base_url` 可以不填。
@@ -102,26 +102,26 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
 ### Group 字段
 
-| 字段        | 必填 | 默认值 | 说明                                                                                        |
-| ----------- | ---- | ------ | ------------------------------------------------------------------------------------------- |
-| `name`      | ✅    | —      | 分组名（客户端用此名称作为 model）                                                          |
-| `reviewer`  | ✅    | —      | 审查模型 — 收集、审核、合成子模型答案，独占工具调用权                                       |
+| 字段        | 必填 | 默认值 | 说明                                                                                                                   |
+| ----------- | ---- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `name`      | ✅    | —      | 分组名（客户端用此名称作为 model）                                                                                     |
+| `reviewer`  | ✅    | —      | 审查模型 — 收集、审核、合成子模型答案，独占工具调用权                                                                  |
 | `providers` | ✅    | —      | 子模型列表 — 只提供分析。必须至少配置一个 provider。*审查模型不需要出现在此列表中，除非你希望它也作为子模型参与分析。* |
 
 ### 顶层字段
 
-| 字段                | 必填 | 默认值      | 说明                                        |
-| ------------------- | ---- | ----------- | ------------------------------------------- |
-| `providers`         | ✅    | —           | 供应商定义列表                              |
-| `groups`            | ✅    | —           | 模型分组                                    |
-| `cli.port`          | —    | `8086`      | 监听端口                                    |
-| `cli.host`          | —    | `"0.0.0.0"` | 监听地址                                    |
-| `cli.language`      | —    | `"zh-CN"`   | 界面语言                                    |
-| `session.enabled`   | —    | `false`     | 启用 `previous_response_id` 会话追踪        |
-| `session.ttl`       | —    | `"1h"`      | 会话过期时间                                |
-| `pricing_cache_ttl` | —    | `"72h"`     | 定价库缓存过期时间（`0`=禁用）              |
-| `worker_timeout`    | —    | `"10s"`     | 每个工人类调用的超时；慢工人类会被跳过，避免 Codex 长时间无响应 |
-| `log_level`         | —    | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"` |
+| 字段                | 必填 | 默认值      | 说明                                                            |
+| ------------------- | ---- | ----------- | --------------------------------------------------------------- |
+| `providers`         | ✅    | —           | 供应商定义列表                                                  |
+| `groups`            | ✅    | —           | 模型分组                                                        |
+| `cli.port`          | —    | `8086`      | 监听端口                                                        |
+| `cli.host`          | —    | `"0.0.0.0"` | 监听地址                                                        |
+| `cli.language`      | —    | `"zh-CN"`   | 界面语言                                                        |
+| `session.enabled`   | —    | `false`     | 启用 `previous_response_id` 会话追踪                            |
+| `session.ttl`       | —    | `"1h"`      | 会话过期时间                                                    |
+| `pricing_cache_ttl` | —    | `"72h"`     | 定价库缓存过期时间（`0`=禁用）                                  |
+| `worker_timeout`    | —    | `"40s"`     | 每个工人类调用的超时；慢工人类会被跳过，避免 Codex 长时间无响应 |
+| `log_level`         | —    | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"`                     |
 
 ## 定价自动填充
 
@@ -158,9 +158,9 @@ cat eval/report.md
 
 **实测效果**（deepseek-v4-pro + MiniMax-M3 + glm-5.2，10 题 × 2 轮）：
 
-| 模式                     | 得分        |
-| ------------------------ | ----------- |
-| Fusion (3 模型融合)      | 4.05 / 5.00 |
+| 模式                | 得分        |
+| ------------------- | ----------- |
+| Fusion (3 模型融合) | 4.05 / 5.00 |
 
 Fusion 在架构设计题上提升最显著 (+2.8)，算法题也有明显优势 (+1.0)。
 
@@ -176,8 +176,8 @@ Fusion 在架构设计题上提升最显著 (+2.8)，算法题也有明显优势
 ## Codex 兼容性说明
 
 - FusionGate 发送官方 Responses API 流式事件，每个事件 payload 都带 `type` 字段。文本使用 `response.output_text.delta` / `.done`，审查模型工具调用使用 `response.function_call_arguments.delta` / `.done`。
-- 只要分组配置了子模型，FusionGate 就始终走“子模型 + 审查模型”融合。只有分组没有子模型时，才会退化为 reviewer-only 兜底。
-- `worker_timeout` 默认 `10s`，未按时返回的工人类会被跳过，避免拖垮整个响应。
+- FusionGate 严格执行“子模型 + 审查模型”融合：分组必须配置至少一个子模型；如果一轮请求没有任何子模型按时返回，该轮会失败而不是退化成 reviewer-only 单模型输出。
+- `worker_timeout` 默认 `40s`，未按时返回的工人类会被跳过；只要至少一个子模型返回，审查模型就基于已收集意见继续合成。
 - SSE 响应头包含 `X-Accel-Buffering: no` 避免反向代理缓冲；内部进度通过 SSE comment 保活，避免 Codex 把 FusionGate 状态误当成模型输出。
 
 ## 启动时健康检查

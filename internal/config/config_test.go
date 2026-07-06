@@ -3,6 +3,7 @@ package config
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestConfigDoesNotExposeFusionMode(t *testing.T) {
@@ -45,5 +46,24 @@ func TestValidateRejectsGroupWithoutWorkers(t *testing.T) {
 	errs := cfg.Validate()
 	if len(errs) == 0 {
 		t.Fatal("Validate should reject groups without worker providers")
+	}
+}
+
+func TestDefaultWorkerTimeoutAllowsFusionToCollectOpinions(t *testing.T) {
+	cfg, err := parse([]byte(`{
+		"providers": [
+			{"name":"reviewer","base_url":"http://example.test/v1","model_name":"reviewer-model","api_key":"key"},
+			{"name":"worker","base_url":"http://example.test/v1","model_name":"worker-model","api_key":"key"}
+		],
+		"groups": [
+			{"name":"coding","reviewer":"reviewer","providers":["worker"]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if got := cfg.WorkerTimeoutDuration(); got != 20*time.Second {
+		t.Fatalf("worker timeout = %v, want 40s", got)
 	}
 }

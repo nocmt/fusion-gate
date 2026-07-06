@@ -57,7 +57,7 @@
   "_pricing_note": "定价库源自 LiteLLM (2400+ 模型)，启动时自动拉取并缓存。",
   "_auto_fill_fields": "context_length, output_length, input_token_price, cached_token_price, output_token_price",
   "pricing_cache_ttl": "72h",
-  "worker_timeout": "10s",
+  "worker_timeout": "40s",
   "session": {
     "enabled": true,
     "ttl": "1h"
