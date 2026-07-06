@@ -87,7 +87,7 @@ func checkOne(p config.Provider, timeout time.Duration) Result {
 
 	start := time.Now()
 	body := fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, p.ModelName)
-	req, _ := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/chat/completions", strings.NewReader(body))
+	req, _ := http.NewRequestWithContext(ctx, "POST", p.ResolveEndpoint(), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 

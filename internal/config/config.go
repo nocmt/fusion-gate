@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,8 @@ import (
 type Provider struct {
 	Name             string  `json:"name"`
 	BaseURL          string  `json:"base_url"`
+	FullURL          string  `json:"full_url,omitempty"`  // 最高优先级，直接使用此 URL
+	Type             string  `json:"type,omitempty"`       // "chat"(默认) | "responses"
 	ModelName        string  `json:"model_name"`
 	APIKey           string  `json:"api_key"`
 	ContextLength    int     `json:"context_length"`
@@ -20,6 +23,25 @@ type Provider struct {
 	InputTokenPrice  float64 `json:"input_token_price"`
 	CachedTokenPrice float64 `json:"cached_token_price"`
 	OutputTokenPrice float64 `json:"output_token_price"`
+}
+
+// ResolveEndpoint 返回该 provider 的实际请求 URL。
+// 优先级: FullURL > BaseURL + type 路径 > BaseURL + /chat/completions
+func (p Provider) ResolveEndpoint() string {
+	if p.FullURL != "" { return p.FullURL }
+	base := strings.TrimSuffix(p.BaseURL, "/")
+	switch p.Type {
+	case "responses":
+		return base + "/responses"
+	default:
+		return base + "/chat/completions"
+	}
+}
+
+// APIType 返回该 provider 的 API 格式: "chat" 或 "responses"。
+func (p Provider) APIType() string {
+	if p.Type == "responses" { return "responses" }
+	return "chat"
 }
 
 // SessionConfig 会话管理配置（用于 previous_response_id 映射）。
