@@ -30,6 +30,7 @@ eval/report.json
 
 # 日志
 *.log
+logs/
 
 # 加密缓存
 fusiongate_health_check

@@ -29,16 +29,20 @@ func HandleChatCompletions(
 			writeErr(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		bodyRaw, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+
 		var req types.ChatCompletionRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.Unmarshal(bodyRaw, &req); err != nil {
 			writeErr(w, "invalid request: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		r.Body.Close()
 
 		groupName := resolveGroup(req.XGroup, req.Model, cfg)
-		log.Info("ChatCompletions model=%s group=%s stream=%v tools=%d",
-			req.Model, groupName, req.Stream, len(req.Tools))
+		log.Info("ChatCompletions model=%s group=%s stream=%v tools=%d msgs=%d",
+			req.Model, groupName, req.Stream, len(req.Tools), len(req.Messages))
+		log.Raw("REQ-CHAT", "model=%s messages=%d tools=%d body=%s",
+			req.Model, len(req.Messages), len(req.Tools), truncForLog(bodyRaw))
 
 		ictx := types.InternalContext{
 			GroupName: groupName, Tools: req.Tools,
@@ -165,6 +169,8 @@ func HandleResponses(
 
 		log.Info("Responses model=%s group=%s stream=%v tools=%d sid=%s",
 			req.Model, groupName, req.Stream, len(req.Tools), sessionID)
+		log.Raw("REQ-RESPONSES", "model=%s tools=%d prev=%s input=%s",
+			req.Model, len(req.Tools), req.PreviousResponseID, truncForLog(body))
 
 		chatReq, err := responsesReqToChat(req)
 		if err != nil { writeResponsesErr(w, err.Error(), http.StatusBadRequest); return }
@@ -493,3 +499,9 @@ func extractConvID(req types.ResponsesRequest) string {
 }
 
 func strPtr(s string) *string { return &s }
+
+func truncForLog(raw []byte) string {
+	s := string(raw)
+	if len(s) > 4000 { return s[:4000] + "...[truncated]" }
+	return s
+}

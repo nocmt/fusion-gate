@@ -80,7 +80,10 @@ func (c *Client) streamViaChatCompletions(ctx context.Context, messages []types.
 }
 
 func (c *Client) doChatRequest(ctx context.Context, raw []byte) (*types.ChatCompletionResponse, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.provider.ResolveEndpoint(), bytes.NewReader(raw))
+	url := c.provider.ResolveEndpoint()
+	c.log.Raw("UPSTREAM-REQ", "[%s] POST %s body=%s", c.provider.Name, url, truncForLog(raw))
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
 
@@ -88,6 +91,7 @@ func (c *Client) doChatRequest(ctx context.Context, raw []byte) (*types.ChatComp
 	if err != nil { return nil, fmt.Errorf("%s call failed: %w", c.provider.Name, err) }
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+	c.log.Raw("UPSTREAM-RESP", "[%s] HTTP %d body=%s", c.provider.Name, resp.StatusCode, truncForLog(data))
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("%s HTTP %d: %s", c.provider.Name, resp.StatusCode, truncate(string(data), 300))
 	}
@@ -99,7 +103,10 @@ func (c *Client) doChatRequest(ctx context.Context, raw []byte) (*types.ChatComp
 }
 
 func (c *Client) doChatStream(ctx context.Context, raw []byte) (<-chan types.StreamChunk, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.provider.ResolveEndpoint(), bytes.NewReader(raw))
+	url := c.provider.ResolveEndpoint()
+	c.log.Raw("UPSTREAM-STREAM", "[%s] POST %s body=%s", c.provider.Name, url, truncForLog(raw))
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
 	req.Header.Set("Accept", "text/event-stream")
@@ -330,6 +337,12 @@ func parseResponsesToChat(raw []byte, model string) *types.ChatCompletionRespons
 func truncate(s string, n int) string {
 	if len(s) <= n { return s }
 	return s[:n] + "..."
+}
+
+func truncForLog(raw []byte) string {
+	s := string(raw)
+	if len(s) > 4000 { return s[:4000] + "...[truncated]" }
+	return s
 }
 
 func indexOf(s, sub []byte) int {

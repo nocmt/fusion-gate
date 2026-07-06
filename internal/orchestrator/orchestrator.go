@@ -39,6 +39,9 @@ func (o *Orchestrator) Run(
 	req types.ChatCompletionRequest,
 	ictx types.InternalContext,
 ) (*types.ChatCompletionResponse, error) {
+	req.Messages = normalizeMessages(req.Messages)
+	o.log.Raw("RUN", "group=%s %s tools=%d", ictx.GroupName, msgSummary(req.Messages), len(ictx.Tools))
+
 	group, reviewerCli := o.resolveGroup(ictx.GroupName)
 	if reviewerCli == nil {
 		return nil, fmt.Errorf("group %q reviewer not found", ictx.GroupName)
@@ -88,6 +91,8 @@ func (o *Orchestrator) RunStream(
 	req types.ChatCompletionRequest,
 	ictx types.InternalContext,
 ) (<-chan types.StreamChunk, error) {
+	req.Messages = normalizeMessages(req.Messages)
+
 	group, reviewerCli := o.resolveGroup(ictx.GroupName)
 	if reviewerCli == nil {
 		return nil, fmt.Errorf("group %q reviewer not found", ictx.GroupName)
@@ -281,4 +286,21 @@ func (o *Orchestrator) buildReviewerPrompt(
 	out = append(out, req.Messages...)
 	out = append(out, types.Message{Role: "user", Content: sb.String()})
 	return out
+}
+
+func normalizeMessages(msgs []types.Message) []types.Message {
+	converted := 0
+	for i := range msgs {
+		if msgs[i].Role == "developer" {
+			msgs[i].Role = "system"
+			converted++
+		}
+	}
+	return msgs
+}
+
+func msgSummary(msgs []types.Message) string {
+	roles := make([]string, len(msgs))
+	for i, m := range msgs { roles[i] = m.Role }
+	return fmt.Sprintf("%d msgs roles=%v", len(msgs), roles)
 }
