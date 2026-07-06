@@ -2,7 +2,7 @@
   "config": {
     "gateway": "http://localhost:8086",
     "single_group": "single",
-    "fusion_group": "coding_expert",
+    "fusion_group": "coding",
     "rounds": 2,
     "timeout_seconds": 300,
     "judge_timeout_seconds": 180

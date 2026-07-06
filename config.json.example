@@ -43,7 +43,7 @@
   "groups": [
     {
       "_comment": "审查模型不在 providers 里 → 只负责审核",
-      "name": "coding_expert", "*": true,
+      "name": "coding", "*": true,
       "reviewer": "deepseek", "*": true,
       "providers": ["openai", "custom-proxy", "local"], "*": true
     },
