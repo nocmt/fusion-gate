@@ -20,11 +20,11 @@ type ResponsesRequest struct {
 	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
 	Reasoning          *ReasoningConfig  `json:"reasoning,omitempty"`
 	Store              *bool             `json:"store,omitempty"`
-	PreviousResponseID string           `json:"previous_response_id,omitempty"`
-	Conversation       any              `json:"conversation,omitempty"`
+	PreviousResponseID string            `json:"previous_response_id,omitempty"`
+	Conversation       any               `json:"conversation,omitempty"`
 	Metadata           map[string]string `json:"metadata,omitempty"`
-	User               string           `json:"user,omitempty"`
-	Include            []string         `json:"include,omitempty"`
+	User               string            `json:"user,omitempty"`
+	Include            []string          `json:"include,omitempty"`
 
 	// FusionGate 扩展
 	XGroup    string `json:"x_group,omitempty"`
@@ -32,7 +32,7 @@ type ResponsesRequest struct {
 }
 
 type ReasoningConfig struct {
-	Effort      string `json:"effort,omitempty"`
+	Effort          string `json:"effort,omitempty"`
 	GenerateSummary string `json:"generate_summary,omitempty"`
 }
 
@@ -46,15 +46,15 @@ type ToolItem struct {
 	Strict      *bool  `json:"strict,omitempty"`
 
 	// file_search
-	VectorStoreIDs          []string `json:"vector_store_ids,omitempty"`
-	MaxNumResults           *int     `json:"max_num_results,omitempty"`
-	RankingOptions          any      `json:"ranking_options,omitempty"`
+	VectorStoreIDs []string `json:"vector_store_ids,omitempty"`
+	MaxNumResults  *int     `json:"max_num_results,omitempty"`
+	RankingOptions any      `json:"ranking_options,omitempty"`
 
 	// code_interpreter
 	ContainerCodeInterpreter any `json:"container,omitempty"`
 
 	// web_search
-	UserLocation   any    `json:"user_location,omitempty"`
+	UserLocation      any    `json:"user_location,omitempty"`
 	SearchContextSize string `json:"search_context_size,omitempty"`
 }
 
@@ -86,30 +86,30 @@ type ContentPart struct {
 // --------- 非流式响应 ---------
 
 type ResponsesResponse struct {
-	ID                 string          `json:"id"`
-	Object             string          `json:"object"` // "response"
-	CreatedAt          int64           `json:"created_at"`
-	Status             string          `json:"status"`
-	Model              string          `json:"model"`
-	Output             []OutputItem    `json:"output"`
-	Usage              *UsageDetail    `json:"usage,omitempty"`
-	Error              *ErrorDetail    `json:"error,omitempty"`
-	IncompleteDetails  *Incomplete     `json:"incomplete_details,omitempty"`
-	ConversationID     string          `json:"conversation_id,omitempty"`
-	ResponseID         string          `json:"response_id,omitempty"` // 冗余字段，表示"下一个要传的 previous_response_id"
-	ParallelToolCalls  bool            `json:"parallel_tool_calls"`
-	Temperature        float64         `json:"temperature,omitempty"`
-	TopP               float64         `json:"top_p,omitempty"`
-	MaxOutputTokens    int             `json:"max_output_tokens,omitempty"`
-	PreviousResponseID string          `json:"previous_response_id,omitempty"`
+	ID                 string       `json:"id"`
+	Object             string       `json:"object"` // "response"
+	CreatedAt          int64        `json:"created_at"`
+	Status             string       `json:"status"`
+	Model              string       `json:"model"`
+	Output             []OutputItem `json:"output"`
+	Usage              *UsageDetail `json:"usage,omitempty"`
+	Error              *ErrorDetail `json:"error,omitempty"`
+	IncompleteDetails  *Incomplete  `json:"incomplete_details,omitempty"`
+	ConversationID     string       `json:"conversation_id,omitempty"`
+	ResponseID         string       `json:"response_id,omitempty"` // 冗余字段，表示"下一个要传的 previous_response_id"
+	ParallelToolCalls  bool         `json:"parallel_tool_calls"`
+	Temperature        float64      `json:"temperature,omitempty"`
+	TopP               float64      `json:"top_p,omitempty"`
+	MaxOutputTokens    int          `json:"max_output_tokens,omitempty"`
+	PreviousResponseID string       `json:"previous_response_id,omitempty"`
 }
 
 type UsageDetail struct {
-	InputTokens              int                    `json:"input_tokens"`
-	OutputTokens             int                    `json:"output_tokens"`
-	TotalTokens              int                    `json:"total_tokens"`
-	InputTokensDetails       *InputTokensDetail     `json:"input_tokens_details,omitempty"`
-	OutputTokensDetails      *OutputTokensDetail    `json:"output_tokens_details,omitempty"`
+	InputTokens         int                 `json:"input_tokens"`
+	OutputTokens        int                 `json:"output_tokens"`
+	TotalTokens         int                 `json:"total_tokens"`
+	InputTokensDetails  *InputTokensDetail  `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails *OutputTokensDetail `json:"output_tokens_details,omitempty"`
 }
 type InputTokensDetail struct {
 	CachedTokens int `json:"cached_tokens,omitempty"`
@@ -130,7 +130,7 @@ type Incomplete struct {
 
 type OutputItem struct {
 	ID     string `json:"id"`
-	Type   string `json:"type"` // "message"|"function_call"|"web_search_call"|"file_search_call"|"code_interpreter_call"
+	Type   string `json:"type"`             // "message"|"function_call"|"web_search_call"|"file_search_call"|"code_interpreter_call"
 	Status string `json:"status,omitempty"` // "in_progress"|"completed"|"incomplete"
 
 	// message
@@ -198,6 +198,13 @@ type EventTextDone struct {
 	Text         string `json:"text"`
 }
 
+type EventContentPartDone struct {
+	OutputIndex  int           `json:"output_index"`
+	ItemID       string        `json:"item_id"`
+	ContentIndex int           `json:"content_index"`
+	Part         OutputContent `json:"part"`
+}
+
 type EventFunctionCallArgsDelta struct {
 	OutputIndex  int    `json:"output_index"`
 	ItemID       string `json:"item_id"`
@@ -218,15 +225,15 @@ type EventOutputItemDone struct {
 }
 
 type EventResponseCompleted struct {
-	ID               string       `json:"id"`
-	Object           string       `json:"object"`
-	CreatedAt        int64        `json:"created_at"`
-	Model            string       `json:"model"`
-	Status           string       `json:"status"`
-	Output           []OutputItem `json:"output"`
-	Usage            *UsageDetail `json:"usage,omitempty"`
-	ConversationID   string       `json:"conversation_id,omitempty"`
-	ResponseID       string       `json:"response_id,omitempty"`
+	ID                string       `json:"id"`
+	Object            string       `json:"object"`
+	CreatedAt         int64        `json:"created_at"`
+	Model             string       `json:"model"`
+	Status            string       `json:"status"`
+	Output            []OutputItem `json:"output"`
+	Usage             *UsageDetail `json:"usage,omitempty"`
+	ConversationID    string       `json:"conversation_id,omitempty"`
+	ResponseID        string       `json:"response_id,omitempty"`
 	IncompleteDetails *Incomplete  `json:"incomplete_details,omitempty"`
 }
 

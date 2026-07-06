@@ -14,8 +14,8 @@ import (
 type Provider struct {
 	Name             string  `json:"name"`
 	BaseURL          string  `json:"base_url"`
-	FullURL          string  `json:"full_url,omitempty"`  // 最高优先级，直接使用此 URL
-	Type             string  `json:"type,omitempty"`       // "chat"(默认) | "responses"
+	FullURL          string  `json:"full_url,omitempty"` // 最高优先级，直接使用此 URL
+	Type             string  `json:"type,omitempty"`     // "chat"(默认) | "responses"
 	ModelName        string  `json:"model_name"`
 	APIKey           string  `json:"api_key"`
 	ContextLength    int     `json:"context_length"`
@@ -28,7 +28,9 @@ type Provider struct {
 // ResolveEndpoint 返回该 provider 的实际请求 URL。
 // 优先级: FullURL > BaseURL + type 路径 > BaseURL + /chat/completions
 func (p Provider) ResolveEndpoint() string {
-	if p.FullURL != "" { return p.FullURL }
+	if p.FullURL != "" {
+		return p.FullURL
+	}
 	base := strings.TrimSuffix(p.BaseURL, "/")
 	switch p.Type {
 	case "responses":
@@ -40,7 +42,9 @@ func (p Provider) ResolveEndpoint() string {
 
 // APIType 返回该 provider 的 API 格式: "chat" 或 "responses"。
 func (p Provider) APIType() string {
-	if p.Type == "responses" { return "responses" }
+	if p.Type == "responses" {
+		return "responses"
+	}
 	return "chat"
 }
 
@@ -67,16 +71,18 @@ type CLI struct {
 
 // Config 顶层配置。
 type Config struct {
-	Providers   []Provider    `json:"providers"`
-	Groups      []Group       `json:"groups"`
-	Session     SessionConfig `json:"session"`
-	PricingTTL  string        `json:"pricing_cache_ttl,omitempty"` // 定价缓存过期时间，默认 "72h"
-	LogLevel    string        `json:"log_level"`
-	CLI         CLI           `json:"cli"`
+	Providers     []Provider    `json:"providers"`
+	Groups        []Group       `json:"groups"`
+	Session       SessionConfig `json:"session"`
+	PricingTTL    string        `json:"pricing_cache_ttl,omitempty"` // 定价缓存过期时间，默认 "72h"
+	LogLevel      string        `json:"log_level"`
+	CLI           CLI           `json:"cli"`
+	WorkerTimeout string        `json:"worker_timeout,omitempty"` // 工人类调用超时，默认 "10s"
 
-	pricingTTLDur time.Duration
-	providerMap   map[string]Provider
-	groupMap      map[string]Group
+	pricingTTLDur    time.Duration
+	workerTimeoutDur time.Duration
+	providerMap      map[string]Provider
+	groupMap         map[string]Group
 }
 
 // ---- 加载 ----
@@ -98,9 +104,14 @@ func Load() (*Config, error) {
 	var lastErr error
 	for _, p := range candidates {
 		data, err := os.ReadFile(p)
-		if err != nil { lastErr = err; continue }
+		if err != nil {
+			lastErr = err
+			continue
+		}
 		cfg, err := parse(data)
-		if err != nil { return nil, fmt.Errorf("parse %s: %w", p, err) }
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", p, err)
+		}
 		cfg.providerMap["__config_path__"] = Provider{Name: "__config_path__", BaseURL: p}
 		return cfg, nil
 	}
@@ -109,16 +120,21 @@ func Load() (*Config, error) {
 
 func parse(data []byte) (*Config, error) {
 	var raw struct {
-		Providers []Provider    `json:"providers"`
-		Groups    []Group       `json:"groups"`
-		Session   SessionConfig `json:"session"`
-		LogLevel  string        `json:"log_level"`
-		CLI       CLI           `json:"cli"`
+		Providers     []Provider    `json:"providers"`
+		Groups        []Group       `json:"groups"`
+		Session       SessionConfig `json:"session"`
+		PricingTTL    string        `json:"pricing_cache_ttl,omitempty"`
+		LogLevel      string        `json:"log_level"`
+		CLI           CLI           `json:"cli"`
+		WorkerTimeout string        `json:"worker_timeout,omitempty"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil { return nil, err }
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Providers: raw.Providers, Groups: raw.Groups,
 		Session: raw.Session, LogLevel: raw.LogLevel, CLI: raw.CLI,
+		PricingTTL: raw.PricingTTL, WorkerTimeout: raw.WorkerTimeout,
 	}
 	cfg.index()
 	cfg.fillDefaults()
@@ -127,57 +143,100 @@ func parse(data []byte) (*Config, error) {
 
 func (c *Config) index() {
 	c.providerMap = make(map[string]Provider, len(c.Providers))
-	for _, p := range c.Providers { c.providerMap[p.Name] = p }
+	for _, p := range c.Providers {
+		c.providerMap[p.Name] = p
+	}
 	c.groupMap = make(map[string]Group, len(c.Groups))
-	for _, g := range c.Groups { c.groupMap[g.Name] = g }
+	for _, g := range c.Groups {
+		c.groupMap[g.Name] = g
+	}
 }
 
 func (c *Config) fillDefaults() {
-	if c.LogLevel == "" { c.LogLevel = "info" }
-	if c.CLI.Port == 0 { c.CLI.Port = 8086 }
-	if c.CLI.Host == "" { c.CLI.Host = "0.0.0.0" }
-	if c.CLI.Language == "" { c.CLI.Language = "zh-CN" }
-	if !c.Session.Enabled && c.Session.TTL != "" { c.Session.Enabled = true }
-	if c.Session.TTL == "" { c.Session.TTL = "1h" }
-	if c.PricingTTL == "" { c.PricingTTL = "72h" }
+	if c.LogLevel == "" {
+		c.LogLevel = "info"
+	}
+	if c.CLI.Port == 0 {
+		c.CLI.Port = 8086
+	}
+	if c.CLI.Host == "" {
+		c.CLI.Host = "0.0.0.0"
+	}
+	if c.CLI.Language == "" {
+		c.CLI.Language = "zh-CN"
+	}
+	if !c.Session.Enabled && c.Session.TTL != "" {
+		c.Session.Enabled = true
+	}
+	if c.Session.TTL == "" {
+		c.Session.TTL = "1h"
+	}
+	if c.PricingTTL == "" {
+		c.PricingTTL = "72h"
+	}
+	if c.WorkerTimeout == "" {
+		c.WorkerTimeout = "10s"
+	}
 	d, err := time.ParseDuration(c.Session.TTL)
-	if err != nil { d = time.Hour }
+	if err != nil {
+		d = time.Hour
+	}
 	c.Session.TTLDuration = d
 	d2, err2 := time.ParseDuration(c.PricingTTL)
-	if err2 != nil { d2 = 72 * time.Hour }
+	if err2 != nil {
+		d2 = 72 * time.Hour
+	}
 	c.pricingTTLDur = d2
+	d3, err3 := time.ParseDuration(c.WorkerTimeout)
+	if err3 != nil {
+		d3 = 10 * time.Second
+	}
+	c.workerTimeoutDur = d3
 }
 
 func (c *Config) Provider(name string) (Provider, bool) {
-	p, ok := c.providerMap[name]; return p, ok
+	p, ok := c.providerMap[name]
+	return p, ok
 }
 
 func (c *Config) Group(name string) (Group, bool) {
-	g, ok := c.groupMap[name]; return g, ok
+	g, ok := c.groupMap[name]
+	return g, ok
 }
 
 func (c *Config) PricingTTLDuration() time.Duration { return c.pricingTTLDur }
 
+func (c *Config) WorkerTimeoutDuration() time.Duration { return c.workerTimeoutDur }
+
 func (c *Config) ConfigPath() string {
-	if p, ok := c.providerMap["__config_path__"]; ok { return p.BaseURL }
+	if p, ok := c.providerMap["__config_path__"]; ok {
+		return p.BaseURL
+	}
 	return ""
 }
 
 func (c *Config) ResolveModelName(model string) string {
 	if g, ok := c.Group(model); ok {
-		if p, ok2 := c.Provider(g.Reviewer); ok2 { return p.ModelName }
+		if p, ok2 := c.Provider(g.Reviewer); ok2 {
+			return p.ModelName
+		}
 	}
 	return model
 }
 
 func (c *Config) Validate() []error {
 	var errs []error
-	if len(c.Providers) == 0 { errs = append(errs, fmt.Errorf("未配置任何 provider")) }
+	if len(c.Providers) == 0 {
+		errs = append(errs, fmt.Errorf("未配置任何 provider"))
+	}
 	for _, g := range c.Groups {
 		if g.Reviewer == "" {
 			errs = append(errs, fmt.Errorf("分组 %q 未指定 reviewer", g.Name))
 		} else if _, ok := c.Provider(g.Reviewer); !ok {
 			errs = append(errs, fmt.Errorf("分组 %q 的 reviewer %q 不存在", g.Name, g.Reviewer))
+		}
+		if len(g.Providers) == 0 {
+			errs = append(errs, fmt.Errorf("分组 %q 未配置任何 worker provider；FusionGate 需要至少一个子模型参与融合", g.Name))
 		}
 		for _, pn := range g.Providers {
 			if _, ok := c.Provider(pn); !ok {
@@ -194,11 +253,19 @@ func (c *Config) MergePricing(lookup func(modelName string) *PricingEntry) int {
 	merged := 0
 	for i := range c.Providers {
 		e := lookup(c.Providers[i].ModelName)
-		if e == nil { continue }
+		if e == nil {
+			continue
+		}
 		p := &c.Providers[i]
 		changed := false
-		if p.ContextLength == 0 && e.MaxInputTokens > 0 { p.ContextLength = e.MaxInputTokens; changed = true }
-		if p.OutputLength == 0 && e.MaxOutputTokens > 0 { p.OutputLength = e.MaxOutputTokens; changed = true }
+		if p.ContextLength == 0 && e.MaxInputTokens > 0 {
+			p.ContextLength = e.MaxInputTokens
+			changed = true
+		}
+		if p.OutputLength == 0 && e.MaxOutputTokens > 0 {
+			p.OutputLength = e.MaxOutputTokens
+			changed = true
+		}
 		if p.InputTokenPrice == 0 && e.InputCostPerToken > 0 {
 			// LiteLLM uses USD/token, we use the same
 			p.InputTokenPrice = e.InputCostPerToken
@@ -208,7 +275,9 @@ func (c *Config) MergePricing(lookup func(modelName string) *PricingEntry) int {
 			p.OutputTokenPrice = e.OutputCostPerToken
 			changed = true
 		}
-		if changed { merged++ }
+		if changed {
+			merged++
+		}
 	}
 	return merged
 }

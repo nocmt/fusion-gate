@@ -88,7 +88,9 @@ func (c *Client) doChatRequest(ctx context.Context, raw []byte) (*types.ChatComp
 	req.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
 
 	resp, err := c.http.Do(req)
-	if err != nil { return nil, fmt.Errorf("%s call failed: %w", c.provider.Name, err) }
+	if err != nil {
+		return nil, fmt.Errorf("%s call failed: %w", c.provider.Name, err)
+	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	c.log.Raw("UPSTREAM-RESP", "[%s] HTTP %d body=%s", c.provider.Name, resp.StatusCode, truncForLog(data))
@@ -112,7 +114,9 @@ func (c *Client) doChatStream(ctx context.Context, raw []byte) (<-chan types.Str
 	req.Header.Set("Accept", "text/event-stream")
 
 	resp, err := c.http.Do(req)
-	if err != nil { return nil, fmt.Errorf("%s stream failed: %w", c.provider.Name, err) }
+	if err != nil {
+		return nil, fmt.Errorf("%s stream failed: %w", c.provider.Name, err)
+	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		data, _ := io.ReadAll(resp.Body)
@@ -129,23 +133,31 @@ func (c *Client) doChatStream(ctx context.Context, raw []byte) (<-chan types.Str
 func (c *Client) chatViaResponses(ctx context.Context, messages []types.Message, temp *float64, maxTokens *int, tools []types.Tool) (*types.ChatCompletionResponse, error) {
 	input := messagesToInput(messages)
 	body := map[string]any{
-		"model":        c.provider.ModelName,
-		"input":        input,
-		"stream":       false,
+		"model":             c.provider.ModelName,
+		"input":             input,
+		"stream":            false,
 		"max_output_tokens": maxTokens,
-		"temperature":  temp,
+		"temperature":       temp,
 	}
-	if len(tools) > 0 { body["tools"] = toolsToResponseTools(tools) }
+	if len(tools) > 0 {
+		body["tools"] = toolsToResponseTools(tools)
+	}
 	raw, _ := json.Marshal(body)
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.provider.ResolveEndpoint(), bytes.NewReader(raw))
+	url := c.provider.ResolveEndpoint()
+	c.log.Raw("UPSTREAM-REQ", "[%s] POST %s body=%s", c.provider.Name, url, truncForLog(raw))
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
 
 	resp, err := c.http.Do(req)
-	if err != nil { return nil, fmt.Errorf("%s call failed: %w", c.provider.Name, err) }
+	if err != nil {
+		return nil, fmt.Errorf("%s call failed: %w", c.provider.Name, err)
+	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+	c.log.Raw("UPSTREAM-RESP", "[%s] HTTP %d body=%s", c.provider.Name, resp.StatusCode, truncForLog(data))
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("%s HTTP %d: %s", c.provider.Name, resp.StatusCode, truncate(string(data), 300))
 	}
@@ -156,22 +168,29 @@ func (c *Client) chatViaResponses(ctx context.Context, messages []types.Message,
 func (c *Client) streamViaResponses(ctx context.Context, messages []types.Message, temp *float64, maxTokens *int, tools []types.Tool) (<-chan types.StreamChunk, error) {
 	input := messagesToInput(messages)
 	body := map[string]any{
-		"model":        c.provider.ModelName,
-		"input":        input,
-		"stream":       true,
+		"model":             c.provider.ModelName,
+		"input":             input,
+		"stream":            true,
 		"max_output_tokens": maxTokens,
-		"temperature":  temp,
+		"temperature":       temp,
 	}
-	if len(tools) > 0 { body["tools"] = toolsToResponseTools(tools) }
+	if len(tools) > 0 {
+		body["tools"] = toolsToResponseTools(tools)
+	}
 	raw, _ := json.Marshal(body)
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.provider.ResolveEndpoint(), bytes.NewReader(raw))
+	url := c.provider.ResolveEndpoint()
+	c.log.Raw("UPSTREAM-STREAM", "[%s] POST %s body=%s", c.provider.Name, url, truncForLog(raw))
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.provider.APIKey)
 	req.Header.Set("Accept", "text/event-stream")
 
 	resp, err := c.http.Do(req)
-	if err != nil { return nil, fmt.Errorf("%s stream failed: %w", c.provider.Name, err) }
+	if err != nil {
+		return nil, fmt.Errorf("%s stream failed: %w", c.provider.Name, err)
+	}
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		data, _ := io.ReadAll(resp.Body)
@@ -192,20 +211,32 @@ func parseSSE(resp *http.Response, ch chan<- types.StreamChunk) {
 	tmp := make([]byte, 4096)
 	for {
 		n, err := resp.Body.Read(tmp)
-		if n > 0 { buf = append(buf, tmp[:n]...) }
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+		}
 		for {
 			idx := indexOf(buf, []byte("\n\n"))
-			if idx < 0 { break }
+			if idx < 0 {
+				break
+			}
 			line := string(buf[:idx])
 			buf = buf[idx+2:]
-			if !strings.HasPrefix(line, "data:") { continue }
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if data == "[DONE]" { return }
+			if data == "[DONE]" {
+				return
+			}
 			var chunk types.StreamChunk
-			if json.Unmarshal([]byte(data), &chunk) != nil { continue }
+			if json.Unmarshal([]byte(data), &chunk) != nil {
+				continue
+			}
 			ch <- chunk
 		}
-		if err != nil { return }
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -217,21 +248,56 @@ func parseResponsesSSE(resp *http.Response, ch chan<- types.StreamChunk, model s
 	created := false
 	for {
 		n, err := resp.Body.Read(tmp)
-		if n > 0 { buf = append(buf, tmp[:n]...) }
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+		}
 		for {
 			idx := indexOf(buf, []byte("\n\n"))
-			if idx < 0 { break }
+			if idx < 0 {
+				break
+			}
 			pair := string(buf[:idx])
 			buf = buf[idx+2:]
 			event, data := parseEventPair(pair)
-			if data == "[DONE]" { return }
+			if data == "[DONE]" {
+				return
+			}
+			if event == "" {
+				event = eventType(data)
+			}
 			switch event {
-			case "response.text.delta":
+			case "response.output_text.delta", "response.text.delta":
 				var d types.EventTextDelta
 				if json.Unmarshal([]byte(data), &d) == nil {
 					ch <- types.StreamChunk{
 						ID: "resp_0", Object: "chat.completion.chunk", Model: model,
 						Choices: []types.ChunkChoice{{Index: 0, Delta: types.Delta{Content: d.Delta}}},
+					}
+				}
+			case "response.output_item.added":
+				var d types.EventOutputItemAdded
+				if json.Unmarshal([]byte(data), &d) == nil && d.Item.Type == "function_call" {
+					callID := d.Item.CallID
+					if callID == "" {
+						callID = d.Item.ID
+					}
+					ch <- types.StreamChunk{
+						ID: d.Item.ID, Object: "chat.completion.chunk", Model: model,
+						Choices: []types.ChunkChoice{{Index: 0, Delta: types.Delta{ToolCalls: []types.ToolCall{{
+							Index: d.OutputIndex, ID: callID, Type: "function",
+							Function: types.FunctionCall{Name: d.Item.Name, Arguments: d.Item.Arguments},
+						}}}}},
+					}
+				}
+			case "response.function_call_arguments.delta":
+				var d types.EventFunctionCallArgsDelta
+				if json.Unmarshal([]byte(data), &d) == nil {
+					ch <- types.StreamChunk{
+						ID: d.ItemID, Object: "chat.completion.chunk", Model: model,
+						Choices: []types.ChunkChoice{{Index: 0, Delta: types.Delta{ToolCalls: []types.ToolCall{{
+							Index: d.OutputIndex, Type: "function",
+							Function: types.FunctionCall{Arguments: d.Delta},
+						}}}}},
 					}
 				}
 			case "response.completed":
@@ -258,16 +324,32 @@ func parseResponsesSSE(resp *http.Response, ch chan<- types.StreamChunk, model s
 				}
 			}
 		}
-		if err != nil { return }
+		if err != nil {
+			return
+		}
 	}
 }
 
 func parseEventPair(s string) (event, data string) {
 	for _, line := range strings.Split(s, "\n") {
-		if strings.HasPrefix(line, "event: ") { event = strings.TrimPrefix(line, "event: ") }
-		if strings.HasPrefix(line, "data: ") { data = strings.TrimPrefix(line, "data: ") }
+		if strings.HasPrefix(line, "event: ") {
+			event = strings.TrimPrefix(line, "event: ")
+		}
+		if strings.HasPrefix(line, "data: ") {
+			data = strings.TrimPrefix(line, "data: ")
+		}
 	}
 	return
+}
+
+func eventType(data string) string {
+	var d struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal([]byte(data), &d) != nil {
+		return ""
+	}
+	return d.Type
 }
 
 // ---- 格式转换 ----
@@ -298,8 +380,12 @@ func parseResponsesToChat(raw []byte, model string) *types.ChatCompletionRespons
 		ID        string `json:"id"`
 		CreatedAt int64  `json:"created_at"`
 		Output    []struct {
-			Type    string `json:"type"`
-			Content []struct {
+			ID        string `json:"id"`
+			Type      string `json:"type"`
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+			Content   []struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"content"`
@@ -311,17 +397,29 @@ func parseResponsesToChat(raw []byte, model string) *types.ChatCompletionRespons
 	}
 
 	var content string
+	var toolCalls []types.ToolCall
 	for _, o := range r.Output {
 		if o.Type == "message" {
 			for _, c := range o.Content {
-				if c.Type == "output_text" { content += c.Text }
+				if c.Type == "output_text" {
+					content += c.Text
+				}
 			}
+		} else if o.Type == "function_call" {
+			callID := o.CallID
+			if callID == "" {
+				callID = o.ID
+			}
+			toolCalls = append(toolCalls, types.ToolCall{
+				ID: callID, Type: "function",
+				Function: types.FunctionCall{Name: o.Name, Arguments: o.Arguments},
+			})
 		}
 	}
 
 	resp := &types.ChatCompletionResponse{
 		ID: r.ID, Object: "chat.completion", Created: r.CreatedAt, Model: model,
-		Choices: []types.Choice{{Index: 0, Message: types.Message{Role: "assistant", Content: content}, FinishReason: "stop"}},
+		Choices: []types.Choice{{Index: 0, Message: types.Message{Role: "assistant", Content: content, ToolCalls: toolCalls}, FinishReason: "stop"}},
 	}
 	if r.Usage != nil {
 		resp.Usage = types.Usage{
@@ -335,19 +433,25 @@ func parseResponsesToChat(raw []byte, model string) *types.ChatCompletionRespons
 // ---- 工具 ----
 
 func truncate(s string, n int) string {
-	if len(s) <= n { return s }
+	if len(s) <= n {
+		return s
+	}
 	return s[:n] + "..."
 }
 
 func truncForLog(raw []byte) string {
 	s := string(raw)
-	if len(s) > 4000 { return s[:4000] + "...[truncated]" }
+	if len(s) > 4000 {
+		return s[:4000] + "...[truncated]"
+	}
 	return s
 }
 
 func indexOf(s, sub []byte) int {
 	for i := 0; i <= len(s)-len(sub); i++ {
-		if bytes.Equal(s[i:i+len(sub)], sub) { return i }
+		if bytes.Equal(s[i:i+len(sub)], sub) {
+			return i
+		}
 	}
 	return -1
 }

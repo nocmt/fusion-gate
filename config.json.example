@@ -52,17 +52,12 @@
       "name": "full_team", "*": true,
       "reviewer": "openai", "*": true,
       "providers": ["deepseek", "openai", "custom-proxy"], "*": true
-    },
-    {
-      "_comment": "单模型测试用（providers 为空 → 直通 reviewer）",
-      "name": "single", "*": true,
-      "reviewer": "deepseek", "*": true,
-      "providers": [], "*": true
     }
   ],
   "_pricing_note": "定价库源自 LiteLLM (2400+ 模型)，启动时自动拉取并缓存。",
   "_auto_fill_fields": "context_length, output_length, input_token_price, cached_token_price, output_token_price",
   "pricing_cache_ttl": "72h",
+  "worker_timeout": "10s",
   "session": {
     "enabled": true,
     "ttl": "1h"

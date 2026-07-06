@@ -104,7 +104,7 @@ See `config.json.example` for a full annotated example with all three provider A
 | ----------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `name`      | ✅        | —       | Group name (used as model name by clients)                                                                                           |
 | `reviewer`  | ✅        | —       | Reviewer model — collects & synthesizes worker answers, holds tool authority                                                         |
-| `providers` | ✅        | `[]`    | Worker models — provide analysis only. *Reviewer does NOT need to be listed here unless you want it to also contribute as a worker.* |
+| `providers` | ✅        | —       | Worker models — provide analysis only. Must contain at least one provider. *Reviewer does NOT need to be listed here unless you want it to also contribute as a worker.* |
 
 ### Top-level fields
 
@@ -118,6 +118,7 @@ See `config.json.example` for a full annotated example with all three provider A
 | `session.enabled`   | —        | `false`     | Enable `previous_response_id` tracking      |
 | `session.ttl`       | —        | `"1h"`      | Session expiry                              |
 | `pricing_cache_ttl` | —        | `"72h"`     | Pricing DB cache TTL (`0`=disable)          |
+| `worker_timeout`    | —        | `"10s"`     | Per-worker call timeout; slow workers are skipped to keep Codex interactive |
 | `log_level`         | —        | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"` |
 
 ## Pricing Auto-fill
@@ -133,21 +134,21 @@ automatically filled by matching `model_name` against the database. User-configu
 
 The database is cached locally (default 72h, configurable via `pricing_cache_ttl`).
 
-### Minimal config
+### Minimal fusion config
 
 ```json
 {
-  "providers": [{ "name": "ds", "base_url": "https://api.deepseek.com/v1", "model_name": "deepseek-chat", "api_key": "sk-xxx" }],
-  "groups": [{ "name": "main", "reviewer": "ds", "providers": [] }]
+  "providers": [
+    { "name": "reviewer", "base_url": "https://api.deepseek.com/v1", "model_name": "deepseek-chat", "api_key": "sk-xxx" },
+    { "name": "worker", "base_url": "https://api.deepseek.com/v1", "model_name": "deepseek-chat", "api_key": "sk-xxx" }
+  ],
+  "groups": [{ "name": "main", "reviewer": "reviewer", "providers": ["worker"] }]
 }
 ```
 
-## A/B Benchmarking
+## Benchmarking
 
 ```bash
-# Add a single-model group for comparison:
-# { "name": "single", "reviewer": "deepseek", "providers": [] }
-
 # Run (supports resume — re-run picks up where it left off)
 ./fusiongate-bench --config eval/questions.json --gateway http://localhost:8086
 
@@ -159,9 +160,7 @@ cat eval/report.md
 
 | Mode                      | Score       |
 | ------------------------- | ----------- |
-| Single (DeepSeek direct)  | 3.90 / 5.00 |
 | Fusion (3-model ensemble) | 4.05 / 5.00 |
-| **Delta**                 | **+0.15**   |
 
 Fusion shows the strongest gains on architecture design questions (+2.8) and algorithm tasks (+1.0).
 
@@ -173,6 +172,13 @@ Fusion shows the strongest gains on architecture design questions (+2.8) and alg
 | `POST /v1/responses`        | Responses API (for Codex) |
 | `GET /v1/models`            | Model list                |
 | `GET /health`               | Health check              |
+
+## Codex Compatibility Notes
+
+- FusionGate emits official Responses API stream events with a `type` field in every event payload. Text uses `response.output_text.delta` / `.done`, and reviewer tool calls use `response.function_call_arguments.delta` / `.done`.
+- FusionGate always runs workers + reviewer when a group has workers configured. A reviewer-only request is only used as a fallback for groups with no workers.
+- `worker_timeout` defaults to `10s`; any worker that does not respond in time is skipped instead of stalling the whole response.
+- SSE headers include `X-Accel-Buffering: no` to avoid proxy buffering, and internal progress is sent as SSE comments so Codex does not mistake FusionGate status for model output.
 
 ## Startup Health Check
 
