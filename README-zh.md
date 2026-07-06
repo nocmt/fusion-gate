@@ -47,10 +47,6 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 # 在 Codex 中将 API Base URL 设为 http://localhost:8086/v1
 ```
 
-## Codex 测试指南 → [docs/codex-guide.md](docs/codex-guide.md)
-
-包含：配置方法、三个难度等级的实测题目、主流评测基准清单、GPT-5.4 主模型分析。
-
 ## 缓存策略
 
 三层缓存优化（参考 OpenClacky 90.6% 命中率实践）：
@@ -68,37 +64,68 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
 ## 配置说明（config.json）
 
+详见 `config.json.example`，内含三种 provider API 类型的完整注释示例。
+
+### Provider 字段
+
+| 字段 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | ✅ | — | 供应商唯一标识，分组中引用 |
+| `api_key` | ✅ | — | API 密钥 |
+| `model_name` | ✅ | — | 发送给供应商的模型名称 |
+| `base_url` | ✅¹ | — | 基础 URL（如 `https://api.deepseek.com/v1`） |
+| `full_url` | — | — | **最高优先级**。覆盖 `base_url` + `type`，直接指向任意端点 |
+| `type` | — | `"chat"` | API 格式：`"chat"`（Chat Completions）或 `"responses"`（Responses API） |
+| `context_length` | — | `0` | 最大上下文窗口（tokens） |
+| `output_length` | — | `0` | 最大输出 tokens |
+| `input_token_price` | — | `0` | 输入 token 单价（USD） |
+| `cached_token_price` | — | `0` | 缓存 token 单价（USD） |
+| `output_token_price` | — | `0` | 输出 token 单价（USD） |
+
+> ¹ 如果设置了 `full_url`，`base_url` 可以不填。
+
+### API 类型三种场景
+
 ```jsonc
-{
-  "providers": [
-    {
-      "name": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
-      "model_name": "deepseek-v4-pro",
-      "api_key": "sk-xxx",
-      "context_length": 1000000,
-      "output_length": 384000,
-      "input_token_price": 0.435,
-      "cached_token_price": 0.003625,
-      "output_token_price": 0.87
-    }
-  ],
-  "groups": [
-    {
-      "name": "coding_expert",
-      "reviewer": "deepseek",                        // 审查模型（组长）
-      "providers": ["deepseek", "minimax", "glm"]    // 子模型（组员）
-    }
-  ],
-  "session": { "enabled": true, "ttl": "1h" },
-  "log_level": "info",
-  "cli": { "port": 8086, "host": "0.0.0.0", "language": "zh-CN" }
-}
+// A: Chat Completions（默认，最常见）
+{ "name": "deepseek", "base_url": "https://api.deepseek.com/v1", "model_name": "deepseek-chat", "api_key": "sk-xxx" }
+
+// B: Responses API（如第三方中转站）
+{ "name": "openai", "base_url": "https://api.openai.com/v1", "type": "responses", "model_name": "gpt-5.4", "api_key": "sk-xxx" }
+
+// C: 自定义完整 URL（最高优先级）
+{ "name": "proxy", "full_url": "https://my-proxy.example.com/v1/chat/completions", "model_name": "proxy-model", "api_key": "sk-xxx" }
 ```
 
-**推荐模型组合**（经实测验证）：
-- 审查模型：DeepSeek-V4-Pro（长上下文 + 强审核能力）
-- 子模型：DeepSeek-V4-Pro / MiniMax-M3 / GLM-5.2
+### Group 字段
+
+| 字段 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | ✅ | — | 分组名（客户端用此名称作为 model） |
+| `reviewer` | ✅ | — | 审查模型 — 收集、审核、合成子模型答案，独占工具调用权 |
+| `providers` | ✅ | `[]` | 子模型列表 — 只提供分析。*审查模型不需要出现在此列表中，除非你希望它也作为子模型参与分析。* |
+
+### 顶层字段
+
+| 字段 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `providers` | ✅ | — | 供应商定义列表 |
+| `groups` | ✅ | — | 模型分组 |
+| `cli.port` | — | `8080` | 监听端口 |
+| `cli.host` | — | `"0.0.0.0"` | 监听地址 |
+| `cli.language` | — | `"zh-CN"` | 界面语言 |
+| `session.enabled` | — | `false` | 启用 `previous_response_id` 会话追踪 |
+| `session.ttl` | — | `"1h"` | 会话过期时间 |
+| `log_level` | — | `"info"` | `"debug"` / `"info"` / `"warn"` / `"error"` |
+
+### 最小配置
+
+```json
+{
+  "providers": [{ "name": "ds", "base_url": "https://api.deepseek.com/v1", "model_name": "deepseek-chat", "api_key": "sk-xxx" }],
+  "groups": [{ "name": "main", "reviewer": "ds", "providers": [] }]
+}
+```
 
 ## A/B 基准测试
 

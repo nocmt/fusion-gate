@@ -47,10 +47,6 @@ Or, you can run `build.sh` with one click to package binary files for multiple p
 # In Codex: set API Base URL to http://localhost:8086/v1
 ```
 
-## Codex Testing Guide → [docs/codex-guide.md](docs/codex-guide.md)
-
-Includes: setup instructions, three difficulty levels of test prompts, benchmark suite overview, and GPT-5.4 reviewer analysis.
-
 ## Cache Strategy
 
 Three-layer cache optimization (inspired by OpenClacky's 90.6% hit-rate practice):
@@ -68,37 +64,68 @@ Request 2: "Write quicksort in Go" → cache hit → instant return (0 API calls
 
 ## Configuration (config.json)
 
+See `config.json.example` for a full annotated example with all three provider API types.
+
+### Provider fields
+
+| Field                | Required | Default  | Description                                                                                     |
+| -------------------- | -------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `name`               | ✅        | —        | Unique provider identifier, referenced by groups                                                |
+| `api_key`            | ✅        | —        | API key for authentication                                                                      |
+| `model_name`         | ✅        | —        | Model name sent to the provider                                                                 |
+| `base_url`           | ✅¹       | —        | Base URL (e.g. `https://api.deepseek.com/v1`)                                                   |
+| `full_url`           | —        | —        | **Highest priority**. Overrides `base_url` + `type`. Use this to point directly to any endpoint |
+| `type`               | —        | `"chat"` | API format: `"chat"` (Chat Completions) or `"responses"` (Responses API)                        |
+| `context_length`     | —        | `0`      | Max context window (tokens)                                                                     |
+| `output_length`      | —        | `0`      | Max output tokens                                                                               |
+| `input_token_price`  | —        | `0`      | Price per input token (USD)                                                                     |
+| `cached_token_price` | —        | `0`      | Price per cached token (USD)                                                                    |
+| `output_token_price` | —        | `0`      | Price per output token (USD)                                                                    |
+
+> ¹ `base_url` is required unless `full_url` is set.
+
+### API type scenarios
+
 ```jsonc
-{
-  "providers": [
-    {
-      "name": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
-      "model_name": "deepseek-v4-pro",
-      "api_key": "sk-xxx",
-      "context_length": 1000000,
-      "output_length": 384000,
-      "input_token_price": 0.435,
-      "cached_token_price": 0.003625,
-      "output_token_price": 0.87
-    }
-  ],
-  "groups": [
-    {
-      "name": "coding_expert",
-      "reviewer": "deepseek",                        // reviewer (lead)
-      "providers": ["deepseek", "minimax", "glm"]    // workers (experts)
-    }
-  ],
-  "session": { "enabled": true, "ttl": "1h" },
-  "log_level": "info",
-  "cli": { "port": 8086, "host": "0.0.0.0", "language": "zh-CN" }
-}
+// A: Chat Completions (default — most providers)
+{ "name": "deepseek", "base_url": "https://api.deepseek.com/v1", "model_name": "deepseek-chat", "api_key": "sk-xxx" }
+
+// B: Responses API (e.g. third-party proxies)
+{ "name": "openai", "base_url": "https://api.openai.com/v1", "type": "responses", "model_name": "gpt-5.4", "api_key": "sk-xxx" }
+
+// C: Full URL override (highest priority)
+{ "name": "proxy", "full_url": "https://my-proxy.example.com/v1/chat/completions", "model_name": "proxy-model", "api_key": "sk-xxx" }
 ```
 
-**Recommended models** (benchmark-verified):
-- Reviewer: DeepSeek-V4-Pro (long context + strong review ability)
-- Workers: DeepSeek-V4-Pro / MiniMax-M3 / GLM-5.2
+### Group fields
+
+| Field       | Required | Default | Description                                                                                                                          |
+| ----------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`      | ✅        | —       | Group name (used as model name by clients)                                                                                           |
+| `reviewer`  | ✅        | —       | Reviewer model — collects & synthesizes worker answers, holds tool authority                                                         |
+| `providers` | ✅        | `[]`    | Worker models — provide analysis only. *Reviewer does NOT need to be listed here unless you want it to also contribute as a worker.* |
+
+### Top-level fields
+
+| Field             | Required | Default     | Description                                 |
+| ----------------- | -------- | ----------- | ------------------------------------------- |
+| `providers`       | ✅        | —           | Provider definitions                        |
+| `groups`          | ✅        | —           | Model groups                                |
+| `cli.port`        | —        | `8080`      | Listen port                                 |
+| `cli.host`        | —        | `"0.0.0.0"` | Listen host                                 |
+| `cli.language`    | —        | `"zh-CN"`   | UI language                                 |
+| `session.enabled` | —        | `false`     | Enable `previous_response_id` tracking      |
+| `session.ttl`     | —        | `"1h"`      | Session expiry                              |
+| `log_level`       | —        | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"` |
+
+### Minimal config
+
+```json
+{
+  "providers": [{ "name": "ds", "base_url": "https://api.deepseek.com/v1", "model_name": "deepseek-chat", "api_key": "sk-xxx" }],
+  "groups": [{ "name": "main", "reviewer": "ds", "providers": [] }]
+}
+```
 
 ## A/B Benchmarking
 
