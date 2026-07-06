@@ -68,20 +68,23 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
 ### Provider 字段
 
-| 字段 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `name` | ✅ | — | 供应商唯一标识，分组中引用 |
-| `api_key` | ✅ | — | API 密钥 |
-| `model_name` | ✅ | — | 发送给供应商的模型名称 |
-| `base_url` | ✅¹ | — | 基础 URL（如 `https://api.deepseek.com/v1`） |
-| `full_url` | — | — | **最高优先级**。覆盖 `base_url` + `type`，直接指向任意端点 |
-| `type` | — | `"chat"` | API 格式：`"chat"`（Chat Completions）或 `"responses"`（Responses API） |
-| `context_length` | — | `0` | 最大上下文窗口（tokens） |
-| `output_length` | — | `0` | 最大输出 tokens |
-| `input_token_price` | — | `0` | 输入 token 单价（USD） |
-| `cached_token_price` | — | `0` | 缓存 token 单价（USD） |
-| `output_token_price` | — | `0` | 输出 token 单价（USD） |
+| 字段                 | 必填 | 默认值   | 说明                                                                    |
+| -------------------- | ---- | -------- | ----------------------------------------------------------------------- |
+| `name`               | ✅    | —        | 供应商唯一标识，分组中引用                                              |
+| `api_key`            | ✅    | —        | API 密钥                                                                |
+| `model_name`         | ✅    | —        | 发送给供应商的模型名称                                                  |
+| `base_url`           | ✅¹   | —        | 基础 URL（如 `https://api.deepseek.com/v1`）                            |
+| `full_url`           | —    | —        | **最高优先级**。覆盖 `base_url` + `type`，直接指向任意端点              |
+| `type`               | —    | `"chat"` | API 格式：`"chat"`（Chat Completions）或 `"responses"`（Responses API） |
+| `context_length`     | ⓟ    | `0`      | 最大上下文窗口。由定价库自动填充                                          |
+| `output_length`      | ⓟ    | `0`      | 最大输出 tokens。由定价库自动填充                                         |
+| `context_length`     | ⓟ    | `0`      | 最大上下文窗口。由定价库自动填充                                          |
+| `output_length`      | ⓟ    | `0`      | 最大输出 tokens。由定价库自动填充                                         |
+| `input_token_price`  | ⓟ    | `0`      | 输入 token 单价（USD）。由定价库自动填充                                  |
+| `cached_token_price` | ⓟ    | `0`      | 缓存 token 单价（USD）。由定价库自动填充                                  |
+| `output_token_price` | ⓟ    | `0`      | 输出 token 单价（USD）。由定价库自动填充                                  |
 
+> ⓟ = 由 [LiteLLM 定价库](https://github.com/BerriAI/litellm) 自动填充（2400+ 模型）。省略这些字段即可。
 > ¹ 如果设置了 `full_url`，`base_url` 可以不填。
 
 ### API 类型三种场景
@@ -99,24 +102,36 @@ go build -o fusiongate-bench ./cmd/fusiongate-bench/
 
 ### Group 字段
 
-| 字段 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `name` | ✅ | — | 分组名（客户端用此名称作为 model） |
-| `reviewer` | ✅ | — | 审查模型 — 收集、审核、合成子模型答案，独占工具调用权 |
-| `providers` | ✅ | `[]` | 子模型列表 — 只提供分析。*审查模型不需要出现在此列表中，除非你希望它也作为子模型参与分析。* |
+| 字段        | 必填 | 默认值 | 说明                                                                                        |
+| ----------- | ---- | ------ | ------------------------------------------------------------------------------------------- |
+| `name`      | ✅    | —      | 分组名（客户端用此名称作为 model）                                                          |
+| `reviewer`  | ✅    | —      | 审查模型 — 收集、审核、合成子模型答案，独占工具调用权                                       |
+| `providers` | ✅    | `[]`   | 子模型列表 — 只提供分析。*审查模型不需要出现在此列表中，除非你希望它也作为子模型参与分析。* |
 
 ### 顶层字段
 
-| 字段 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `providers` | ✅ | — | 供应商定义列表 |
-| `groups` | ✅ | — | 模型分组 |
-| `cli.port` | — | `8080` | 监听端口 |
-| `cli.host` | — | `"0.0.0.0"` | 监听地址 |
-| `cli.language` | — | `"zh-CN"` | 界面语言 |
-| `session.enabled` | — | `false` | 启用 `previous_response_id` 会话追踪 |
-| `session.ttl` | — | `"1h"` | 会话过期时间 |
-| `log_level` | — | `"info"` | `"debug"` / `"info"` / `"warn"` / `"error"` |
+| 字段                | 必填 | 默认值      | 说明                                        |
+| ------------------- | ---- | ----------- | ------------------------------------------- |
+| `providers`         | ✅    | —           | 供应商定义列表                              |
+| `groups`            | ✅    | —           | 模型分组                                    |
+| `cli.port`          | —    | `8086`      | 监听端口                                    |
+| `cli.host`          | —    | `"0.0.0.0"` | 监听地址                                    |
+| `cli.language`      | —    | `"zh-CN"`   | 界面语言                                    |
+| `session.enabled`   | —    | `false`     | 启用 `previous_response_id` 会话追踪        |
+| `session.ttl`       | —    | `"1h"`      | 会话过期时间                                |
+| `pricing_cache_ttl` | —    | `"72h"`     | 定价库缓存过期时间（`0`=禁用）              |
+| `log_level`         | —    | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"` |
+
+## 定价自动填充
+
+FusionGate 内置 [LiteLLM 定价数据库](https://github.com/BerriAI/litellm)（2400+ 模型）。新增 provider 时，未填的 `context_length`、`output_length`、`input_token_price`、`output_token_price` 会自动匹配 `model_name` 从数据库补全。用户配置的值始终优先。
+
+```json
+// 这样就够了 — context_length 和定价从数据库自动补全：
+{"name":"ds","base_url":"https://api.deepseek.com/v1","model_name":"deepseek-chat","api_key":"sk-xxx"}
+```
+
+数据库本地缓存，默认 72 小时过期，可通过 `pricing_cache_ttl` 配置。
 
 ### 最小配置
 

@@ -76,12 +76,13 @@ See `config.json.example` for a full annotated example with all three provider A
 | `base_url`           | ✅¹       | —        | Base URL (e.g. `https://api.deepseek.com/v1`)                                                   |
 | `full_url`           | —        | —        | **Highest priority**. Overrides `base_url` + `type`. Use this to point directly to any endpoint |
 | `type`               | —        | `"chat"` | API format: `"chat"` (Chat Completions) or `"responses"` (Responses API)                        |
-| `context_length`     | —        | `0`      | Max context window (tokens)                                                                     |
-| `output_length`      | —        | `0`      | Max output tokens                                                                               |
-| `input_token_price`  | —        | `0`      | Price per input token (USD)                                                                     |
-| `cached_token_price` | —        | `0`      | Price per cached token (USD)                                                                    |
-| `output_token_price` | —        | `0`      | Price per output token (USD)                                                                    |
+| `context_length`     | ⓟ       | `0`      | Max context window (tokens). Auto-filled from pricing DB                      |
+| `output_length`      | ⓟ       | `0`      | Max output tokens. Auto-filled from pricing DB                               |
+| `input_token_price`  | ⓟ       | `0`      | Price per input token (USD). Auto-filled from pricing DB                     |
+| `cached_token_price` | ⓟ       | `0`      | Price per cached token (USD). Auto-filled from pricing DB                    |
+| `output_token_price` | ⓟ       | `0`      | Price per output token (USD). Auto-filled from pricing DB                    |
 
+> ⓟ = auto-filled from [LiteLLM pricing DB](https://github.com/BerriAI/litellm) (2,400+ models). Omit these to let FusionGate fill them.
 > ¹ `base_url` is required unless `full_url` is set.
 
 ### API type scenarios
@@ -107,16 +108,30 @@ See `config.json.example` for a full annotated example with all three provider A
 
 ### Top-level fields
 
-| Field             | Required | Default     | Description                                 |
-| ----------------- | -------- | ----------- | ------------------------------------------- |
-| `providers`       | ✅        | —           | Provider definitions                        |
-| `groups`          | ✅        | —           | Model groups                                |
-| `cli.port`        | —        | `8080`      | Listen port                                 |
-| `cli.host`        | —        | `"0.0.0.0"` | Listen host                                 |
-| `cli.language`    | —        | `"zh-CN"`   | UI language                                 |
-| `session.enabled` | —        | `false`     | Enable `previous_response_id` tracking      |
-| `session.ttl`     | —        | `"1h"`      | Session expiry                              |
-| `log_level`       | —        | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"` |
+| Field               | Required | Default     | Description                                 |
+| ------------------- | -------- | ----------- | ------------------------------------------- |
+| `providers`         | ✅        | —           | Provider definitions                        |
+| `groups`            | ✅        | —           | Model groups                                |
+| `cli.port`          | —        | `8086`      | Listen port                                 |
+| `cli.host`          | —        | `"0.0.0.0"` | Listen host                                 |
+| `cli.language`      | —        | `"zh-CN"`   | UI language                                 |
+| `session.enabled`   | —        | `false`     | Enable `previous_response_id` tracking      |
+| `session.ttl`       | —        | `"1h"`      | Session expiry                              |
+| `pricing_cache_ttl` | —        | `"72h"`     | Pricing DB cache TTL (`0`=disable)          |
+| `log_level`         | —        | `"info"`    | `"debug"` / `"info"` / `"warn"` / `"error"` |
+
+## Pricing Auto-fill
+
+FusionGate ships with the [LiteLLM pricing database](https://github.com/BerriAI/litellm) (2,400+ models).
+When you add a provider, missing `context_length`, `output_length`, and pricing fields are
+automatically filled by matching `model_name` against the database. User-configured values always win.
+
+```json
+// This is enough — context_length & pricing auto-fill from the pricing DB:
+{"name":"ds","base_url":"https://api.deepseek.com/v1","model_name":"deepseek-chat","api_key":"sk-xxx"}
+```
+
+The database is cached locally (default 72h, configurable via `pricing_cache_ttl`).
 
 ### Minimal config
 

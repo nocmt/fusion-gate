@@ -1,52 +1,40 @@
 {
-  "_comment": "==== FusionGate Example Config ====\n字段标记: *必填  不带星号=可选(有默认值)\n",
+  "_comment": "==== FusionGate Example Config ====\n* = 必填    ⓟ = 自动从定价库填充(可省略)    无标记 = 可选(有默认值)\n",
   "providers": [
     {
-      "_comment": "场景 A: 默认 Chat Completions API（最常用）",
-      "name": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
-      "model_name": "deepseek-chat",
-      "api_key": "sk-xxxxxxxxxxxxxxxx",
-      "context_length": 65536,
-      "output_length": 8192,
-      "input_token_price": 0.000001,
-      "cached_token_price": 0.0000005,
-      "output_token_price": 0.000002
+      "_comment": "场景 A: 极简配置 — 只填 4 个必填字段，其余自动补全（推荐！）",
+      "name": "deepseek", "*": true,
+      "base_url": "https://api.deepseek.com/v1", "*": true,
+      "model_name": "deepseek-chat", "*": true,
+      "api_key": "sk-xxxxxxxxxxxxxxxx", "*": true,
+      "context_length": "ⓟ 自动填充",
+      "output_length": "ⓟ 自动填充",
+      "input_token_price": "ⓟ 自动填充",
+      "cached_token_price": "ⓟ 自动填充",
+      "output_token_price": "ⓟ 自动填充"
     },
     {
       "_comment": "场景 B: 上游是 Responses API 格式（如第三方中转站）",
-      "name": "openai",
-      "base_url": "https://api.openai.com/v1",
+      "name": "openai", "*": true,
+      "base_url": "https://api.openai.com/v1", "*": true,
       "type": "responses",
-      "model_name": "gpt-5.4",
-      "api_key": "sk-xxxxxxxxxxxxxxxx",
-      "context_length": 262144,
-      "output_length": 16384,
-      "input_token_price": 2.50,
-      "cached_token_price": 1.25,
-      "output_token_price": 10.00
+      "model_name": "gpt-5.4", "*": true,
+      "api_key": "sk-xxxxxxxxxxxxxxxx", "*": true
     },
     {
       "_comment": "场景 C: 自定义完整 URL（最高优先级，覆盖 base_url+type）",
-      "name": "custom-proxy",
+      "name": "custom-proxy", "*": true,
       "full_url": "https://my-proxy.example.com/v1/chat/completions",
-      "model_name": "proxy-model",
-      "api_key": "sk-xxxxxxxxxxxxxxxx",
-      "context_length": 131072,
-      "output_length": 8192,
-      "input_token_price": 0.50,
-      "cached_token_price": 0.25,
-      "output_token_price": 2.00
+      "model_name": "proxy-model", "*": true,
+      "api_key": "sk-xxxxxxxxxxxxxxxx", "*": true
     },
     {
-      "_comment": "场景 D: 本地 Ollama",
+      "_comment": "场景 D: 本地 Ollama（免费，价格填 0 或靠自动填充）",
       "name": "local",
-      "base_url": "http://localhost:11434/v1",
+      "base_url": "http://localhost:11434/v1", "*": true,
       "type": "chat",
-      "model_name": "qwen2.5-coder:7b",
-      "api_key": "ollama",
-      "context_length": 32768,
-      "output_length": 4096,
+      "model_name": "qwen2.5-coder:7b", "*": true,
+      "api_key": "ollama", "*": true,
       "input_token_price": 0,
       "cached_token_price": 0,
       "output_token_price": 0
@@ -54,32 +42,33 @@
   ],
   "groups": [
     {
-      "_comment": "审查模型和子模型是独立的两组：reviewer 不在 providers 里也能正常工作",
-      "name": "coding_expert",
-      "reviewer": "deepseek",
-      "providers": ["deepseek", "openai", "local"]
+      "_comment": "审查模型不在 providers 里 → 只负责审核",
+      "name": "coding_expert", "*": true,
+      "reviewer": "deepseek", "*": true,
+      "providers": ["openai", "custom-proxy", "local"], "*": true
     },
     {
-      "_comment": "reviewer 也在 providers 里 → 审查模型自己也出一份分析",
-      "name": "full_team",
-      "reviewer": "openai",
-      "providers": ["deepseek", "openai", "custom-proxy"]
+      "_comment": "审查模型也在 providers 里 → 自己也出一份分析",
+      "name": "full_team", "*": true,
+      "reviewer": "openai", "*": true,
+      "providers": ["deepseek", "openai", "custom-proxy"], "*": true
     },
     {
-      "_comment": "单模型对比测试用（providers 为空 → 直通 reviewer）",
-      "name": "single",
-      "reviewer": "deepseek",
-      "providers": []
+      "_comment": "单模型测试用（providers 为空 → 直通 reviewer）",
+      "name": "single", "*": true,
+      "reviewer": "deepseek", "*": true,
+      "providers": [], "*": true
     }
   ],
+  "_pricing_note": "定价库源自 LiteLLM (2400+ 模型)，启动时自动拉取并缓存。",
+  "_auto_fill_fields": "context_length, output_length, input_token_price, cached_token_price, output_token_price",
+  "pricing_cache_ttl": "72h",
   "session": {
-    "_comment": "previous_response_id 多轮对话映射，可省略",
     "enabled": true,
     "ttl": "1h"
   },
   "log_level": "info",
   "cli": {
-    "_comment": "可全部省略",
     "language": "zh-CN",
     "port": 8086,
     "host": "0.0.0.0"

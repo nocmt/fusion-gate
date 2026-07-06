@@ -67,14 +67,16 @@ type CLI struct {
 
 // Config 顶层配置。
 type Config struct {
-	Providers []Provider    `json:"providers"`
-	Groups    []Group       `json:"groups"`
-	Session   SessionConfig `json:"session"`
-	LogLevel  string        `json:"log_level"`
-	CLI       CLI           `json:"cli"`
+	Providers   []Provider    `json:"providers"`
+	Groups      []Group       `json:"groups"`
+	Session     SessionConfig `json:"session"`
+	PricingTTL  string        `json:"pricing_cache_ttl,omitempty"` // 定价缓存过期时间，默认 "72h"
+	LogLevel    string        `json:"log_level"`
+	CLI         CLI           `json:"cli"`
 
-	providerMap map[string]Provider
-	groupMap    map[string]Group
+	pricingTTLDur time.Duration
+	providerMap   map[string]Provider
+	groupMap      map[string]Group
 }
 
 // ---- 加载 ----
@@ -132,14 +134,18 @@ func (c *Config) index() {
 
 func (c *Config) fillDefaults() {
 	if c.LogLevel == "" { c.LogLevel = "info" }
-	if c.CLI.Port == 0 { c.CLI.Port = 8080 }
+	if c.CLI.Port == 0 { c.CLI.Port = 8086 }
 	if c.CLI.Host == "" { c.CLI.Host = "0.0.0.0" }
 	if c.CLI.Language == "" { c.CLI.Language = "zh-CN" }
 	if !c.Session.Enabled && c.Session.TTL != "" { c.Session.Enabled = true }
 	if c.Session.TTL == "" { c.Session.TTL = "1h" }
+	if c.PricingTTL == "" { c.PricingTTL = "72h" }
 	d, err := time.ParseDuration(c.Session.TTL)
 	if err != nil { d = time.Hour }
 	c.Session.TTLDuration = d
+	d2, err2 := time.ParseDuration(c.PricingTTL)
+	if err2 != nil { d2 = 72 * time.Hour }
+	c.pricingTTLDur = d2
 }
 
 func (c *Config) Provider(name string) (Provider, bool) {
@@ -149,6 +155,8 @@ func (c *Config) Provider(name string) (Provider, bool) {
 func (c *Config) Group(name string) (Group, bool) {
 	g, ok := c.groupMap[name]; return g, ok
 }
+
+func (c *Config) PricingTTLDuration() time.Duration { return c.pricingTTLDur }
 
 func (c *Config) ConfigPath() string {
 	if p, ok := c.providerMap["__config_path__"]; ok { return p.BaseURL }
@@ -178,6 +186,39 @@ func (c *Config) Validate() []error {
 		}
 	}
 	return errs
+}
+
+// MergePricing fills missing provider fields from a pricing entry.
+// User-specified values always win (zero values get filled).
+func (c *Config) MergePricing(lookup func(modelName string) *PricingEntry) int {
+	merged := 0
+	for i := range c.Providers {
+		e := lookup(c.Providers[i].ModelName)
+		if e == nil { continue }
+		p := &c.Providers[i]
+		changed := false
+		if p.ContextLength == 0 && e.MaxInputTokens > 0 { p.ContextLength = e.MaxInputTokens; changed = true }
+		if p.OutputLength == 0 && e.MaxOutputTokens > 0 { p.OutputLength = e.MaxOutputTokens; changed = true }
+		if p.InputTokenPrice == 0 && e.InputCostPerToken > 0 {
+			// LiteLLM uses USD/token, we use the same
+			p.InputTokenPrice = e.InputCostPerToken
+			changed = true
+		}
+		if p.OutputTokenPrice == 0 && e.OutputCostPerToken > 0 {
+			p.OutputTokenPrice = e.OutputCostPerToken
+			changed = true
+		}
+		if changed { merged++ }
+	}
+	return merged
+}
+
+// PricingEntry is a pricing database entry.
+type PricingEntry struct {
+	MaxInputTokens     int     `json:"max_input_tokens"`
+	MaxOutputTokens    int     `json:"max_output_tokens"`
+	InputCostPerToken  float64 `json:"input_cost_per_token"`
+	OutputCostPerToken float64 `json:"output_cost_per_token"`
 }
 
 // ---- ID 生成与缓存 key ----
